@@ -25,5 +25,5 @@ elasticache_node_type       = "cache.t3.micro"
 elasticache_num_cache_nodes = 1
 
 # GitHub Repository (for OIDC)
-github_org  = "opsera-ai"
+github_org  = "opsera-agentic"
 github_repo = "enterprise-voting-app-t1"

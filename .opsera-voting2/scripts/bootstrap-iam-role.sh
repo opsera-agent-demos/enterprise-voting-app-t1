@@ -22,7 +22,7 @@ set -euo pipefail
 AWS_REGION="${AWS_REGION:-us-west-2}"
 APP_NAME="voting2"
 ENVIRONMENT="dev"
-GITHUB_ORG="${GITHUB_ORG:-opsera-ai}"
+GITHUB_ORG="${GITHUB_ORG:-opsera-agentic}"
 GITHUB_REPO="${GITHUB_REPO:-enterprise-voting-app-t1}"
 
 # Derived values

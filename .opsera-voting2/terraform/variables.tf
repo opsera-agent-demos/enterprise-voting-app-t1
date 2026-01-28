@@ -75,7 +75,7 @@ variable "rds_allocated_storage" {
 variable "github_org" {
   description = "GitHub organization name"
   type        = string
-  default     = "opsera-ai"
+  default     = "opsera-agentic"
 }
 
 variable "github_repo" {

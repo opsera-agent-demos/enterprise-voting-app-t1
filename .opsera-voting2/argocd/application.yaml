@@ -31,7 +31,7 @@ spec:
   project: default
 
   source:
-    repoURL: https://github.com/opsera-ai/enterprise-voting-app-t1.git
+    repoURL: https://github.com/opsera-agentic/enterprise-voting-app-t1.git
     targetRevision: main
     path: .opsera-voting2/k8s/overlays/dev
 
