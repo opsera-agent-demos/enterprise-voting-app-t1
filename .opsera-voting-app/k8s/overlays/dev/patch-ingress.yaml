@@ -1,6 +1,6 @@
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║  DEV Ingress Patch - RULE 22: Must include complete TLS section              ║
-# ║  RULE 29: Uses PLACEHOLDER_SUBDOMAIN - replaced by bootstrap                 ║
+# ║  RULE 29: Uses opsera-voting-app-dev.agent.opsera.dev - replaced by bootstrap                 ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 apiVersion: networking.k8s.io/v1
@@ -12,10 +12,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - PLACEHOLDER_SUBDOMAIN
+        - opsera-voting-app-dev.agent.opsera.dev
       secretName: voting-app-dev-tls
   rules:
-    - host: PLACEHOLDER_SUBDOMAIN
+    - host: opsera-voting-app-dev.agent.opsera.dev
       http:
         paths:
           - path: /
