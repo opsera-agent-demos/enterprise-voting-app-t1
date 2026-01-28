@@ -4,22 +4,22 @@ kind: Kustomization
 namespace: voting2-dev
 
 resources:
-  - ../../base
+- ../../base
 
 commonLabels:
   environment: dev
 
 patches:
-  - path: patch-replicas.yaml
-  - path: patch-ingress.yaml
+- path: patch-replicas.yaml
+- path: patch-ingress.yaml
 
 images:
-  - name: PLACEHOLDER_VOTE_IMAGE
-    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/voting2-dev-vote
-    newTag: latest
-  - name: PLACEHOLDER_RESULT_IMAGE
-    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/voting2-dev-result
-    newTag: latest
-  - name: PLACEHOLDER_WORKER_IMAGE
-    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/voting2-dev-worker
-    newTag: latest
+- name: PLACEHOLDER_RESULT_IMAGE
+  newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/voting2-dev-result
+  newTag: latest
+- name: PLACEHOLDER_VOTE_IMAGE
+  newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/voting2-dev-vote
+  newTag: 9cdccd4b83497ba6336e8b6c10fc17113ac51cc2
+- name: PLACEHOLDER_WORKER_IMAGE
+  newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/voting2-dev-worker
+  newTag: 9cdccd4b83497ba6336e8b6c10fc17113ac51cc2
