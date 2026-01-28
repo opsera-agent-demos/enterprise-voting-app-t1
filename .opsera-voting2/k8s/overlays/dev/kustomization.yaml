@@ -16,7 +16,7 @@ patches:
 images:
 - name: PLACEHOLDER_RESULT_IMAGE
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/voting2-dev-result
-  newTag: latest
+  newTag: 6cd8e5aca11a1e7027bdfca0154438caad29fd2c
 - name: PLACEHOLDER_VOTE_IMAGE
   newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/voting2-dev-vote
   newTag: 9cdccd4b83497ba6336e8b6c10fc17113ac51cc2
