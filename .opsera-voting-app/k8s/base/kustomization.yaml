@@ -30,11 +30,11 @@ commonLabels:
 # Images will be overridden in overlays
 images:
   - name: vote
-    newName: PLACEHOLDER_ECR_URI/vote
-    newTag: latest
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/vote
+    newTag: 19c61dc-20260128065555
   - name: result
-    newName: PLACEHOLDER_ECR_URI/result
-    newTag: latest
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/result
+    newTag: 19c61dc-20260128065555
   - name: worker
-    newName: PLACEHOLDER_ECR_URI/worker
-    newTag: latest
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/worker
+    newTag: 19c61dc-20260128065555
