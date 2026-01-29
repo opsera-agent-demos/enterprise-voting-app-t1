@@ -122,16 +122,22 @@ jobs:
             if aws eks update-kubeconfig --name "$SPOKE" --region ${{ env.AWS_REGION }} 2>/dev/null; then
               echo "Connected to spoke: $SPOKE"
 
-              # Get apps targeting this cluster
+              # Get apps targeting this cluster - save to temp file first
               echo "$APPS_JSON" | jq -r --arg c "$cluster" '
                 .items[] |
                 select(.spec.destination.name == $c or .spec.destination.server == $c) |
                 "\(.metadata.name)|\(.spec.destination.namespace)|\(.spec.destination.name // "in-cluster")|\(.status.sync.status // "Unknown")|\(.status.health.status // "Unknown")|\(.spec.source.path // "N/A")"
-              ' | while IFS='|' read NAME NS DEST SYNC HEALTH PATH; do
+              ' > /tmp/cluster_apps.txt
+
+              # Process each app (avoid subshell issue with while loop)
+              while IFS='|' read -r NAME NS DEST SYNC HEALTH PATH; do
+                [ -z "$NAME" ] && continue
                 # Count pods in namespace
-                POD_COUNT=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+                POD_COUNT=$(kubectl get pods -n "$NS" --no-headers 2>/dev/null | wc -l)
+                POD_COUNT=$(echo "$POD_COUNT" | tr -d ' ')
+                [ -z "$POD_COUNT" ] && POD_COUNT="0"
                 echo "${POD_COUNT}|${NAME}|${NS}|${DEST}|${SYNC}|${HEALTH}|${PATH}" >> /tmp/app_pods.txt
-              done
+              done < /tmp/cluster_apps.txt
             else
               echo "Could not connect to spoke: $SPOKE"
               # Add apps with unknown pod count
@@ -139,9 +145,12 @@ jobs:
                 .items[] |
                 select(.spec.destination.name == $c or .spec.destination.server == $c) |
                 "\(.metadata.name)|\(.spec.destination.namespace)|\(.spec.destination.name // "in-cluster")|\(.status.sync.status // "Unknown")|\(.status.health.status // "Unknown")|\(.spec.source.path // "N/A")"
-              ' | while IFS='|' read NAME NS DEST SYNC HEALTH PATH; do
+              ' > /tmp/cluster_apps.txt
+
+              while IFS='|' read -r NAME NS DEST SYNC HEALTH PATH; do
+                [ -z "$NAME" ] && continue
                 echo "?|${NAME}|${NS}|${DEST}|${SYNC}|${HEALTH}|${PATH}" >> /tmp/app_pods.txt
-              done
+              done < /tmp/cluster_apps.txt
             fi
           done
 
