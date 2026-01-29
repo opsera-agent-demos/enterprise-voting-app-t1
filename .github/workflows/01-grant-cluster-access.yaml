@@ -25,9 +25,9 @@ on:
         default: "all"
         type: choice
         options:
-          - all           # Hub + all spokes
-          - hub-only      # Only hub cluster
-          - spokes-only   # Only spoke clusters
+          - all
+          - hub-only
+          - spokes-only
 
 env:
   AWS_REGION: us-west-2
