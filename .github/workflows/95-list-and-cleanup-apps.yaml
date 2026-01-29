@@ -66,8 +66,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Use admin role with hub cluster access
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/speri11-github-actions-role
+          # Use the same role that bootstrap uses for hub cluster access
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/voting2-dev-github-actions
           role-session-name: argocd-list-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
@@ -196,7 +196,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/speri11-github-actions-role
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/voting2-dev-github-actions
           role-session-name: argocd-delete-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
@@ -294,7 +294,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/speri11-github-actions-role
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/voting2-dev-github-actions
           role-session-name: argocd-delete-prefix-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
@@ -414,7 +414,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/speri11-github-actions-role
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/voting2-dev-github-actions
           role-session-name: argocd-cleanup-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
