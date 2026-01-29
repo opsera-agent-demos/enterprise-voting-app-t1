@@ -122,33 +122,24 @@ jobs:
             fi
 
             # Try to connect to spoke cluster and get pod counts
-            if aws eks update-kubeconfig --name "$SPOKE" --region ${{ env.AWS_REGION }} 2>/dev/null; then
-              echo "Connected to spoke: $SPOKE"
+            aws eks update-kubeconfig --name "$SPOKE" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+            echo "Attempting to access spoke: $SPOKE"
+
+            # Test if we can actually access the spoke cluster
+            if kubectl get namespaces --request-timeout=10s >/dev/null 2>&1; then
+              echo "✅ Connected to spoke: $SPOKE"
               echo "Looking for apps targeting cluster: $cluster"
 
               # Get namespace pod counts as JSON object
               echo "Getting pod counts from spoke..."
-              echo "Testing kubectl connection..."
-              kubectl cluster-info || echo "kubectl cluster-info failed"
-              echo "Counting pods..."
-              kubectl get pods --all-namespaces --no-headers 2>&1 | head -20 || echo "kubectl get pods failed"
-              echo "Getting pods as JSON..."
-              kubectl get pods --all-namespaces -o json 2>&1 | jq '
+              kubectl get pods --all-namespaces -o json 2>/dev/null | jq '
                 [.items[] | .metadata.namespace] | group_by(.) |
                 map({key: .[0], value: length}) | from_entries
-              ' > /tmp/ns_pod_counts.json || echo '{}' > /tmp/ns_pod_counts.json
+              ' > /tmp/ns_pod_counts.json 2>/dev/null || echo '{}' > /tmp/ns_pod_counts.json
 
               # Debug: show pod counts
               echo "Pod counts by namespace:"
               cat /tmp/ns_pod_counts.json
-
-              # Debug: show apps for this cluster
-              echo "Apps targeting this cluster:"
-              echo "$APPS_JSON" | jq -r --arg c "$cluster" '
-                .items[] |
-                select(.spec.destination.name == $c or .spec.destination.server == $c) |
-                "  - \(.metadata.name) -> ns: \(.spec.destination.namespace)"
-              '
 
               # Use jq to join apps with pod counts
               echo "$APPS_JSON" | jq -r --arg c "$cluster" --slurpfile pods /tmp/ns_pod_counts.json '
@@ -164,11 +155,10 @@ jobs:
                 } |
                 "\($pods[0][.ns] // 0)|\(.name)|\(.ns)|\(.dest)|\(.sync)|\(.health)|\(.path)"
               ' >> /tmp/app_pods.txt
-
-              echo "Current app_pods.txt:"
-              cat /tmp/app_pods.txt
             else
-              echo "Could not connect to spoke: $SPOKE"
+              echo "⚠️ Cannot access spoke cluster: $SPOKE"
+              echo "   (IAM role needs to be added to spoke cluster's aws-auth ConfigMap)"
+              echo "   Pod counts will show as '?' for apps on this cluster"
               # Add apps with unknown pod count
               echo "$APPS_JSON" | jq -r --arg c "$cluster" '
                 .items[] |
