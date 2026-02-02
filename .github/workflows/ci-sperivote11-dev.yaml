@@ -1,0 +1,147 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# CI BUILD & DEPLOY - sperivote11 DEV
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "CI Build (sperivote11-dev)"
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'vote/**'
+      - 'result/**'
+      - 'worker/**'
+      - '.opsera-sperivote11/**'
+
+env:
+  APP_NAME: sperivote11
+  ENVIRONMENT: dev
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: "🏗️ Build & Push"
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+      - name: Generate Tag
+        id: tag
+        run: |
+          TAG="$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M%S)"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "### 🏷️ Image Tag: \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Build Vote
+        run: |
+          ECR="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}-vote"
+          docker build -f .opsera-sperivote11/Dockerfiles/Dockerfile.vote -t ${ECR}:${{ steps.tag.outputs.tag }} .
+          docker push ${ECR}:${{ steps.tag.outputs.tag }}
+          echo "✅ Vote pushed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Build Result
+        run: |
+          ECR="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}-result"
+          docker build -f .opsera-sperivote11/Dockerfiles/Dockerfile.result -t ${ECR}:${{ steps.tag.outputs.tag }} .
+          docker push ${ECR}:${{ steps.tag.outputs.tag }}
+          echo "✅ Result pushed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Build Worker
+        run: |
+          ECR="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}-worker"
+          docker build -f .opsera-sperivote11/Dockerfiles/Dockerfile.worker -t ${ECR}:${{ steps.tag.outputs.tag }} .
+          docker push ${ECR}:${{ steps.tag.outputs.tag }}
+          echo "✅ Worker pushed" >> $GITHUB_STEP_SUMMARY
+
+  deploy:
+    name: "🚀 Deploy"
+    needs: [build]
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.verify.outputs.success }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Update Kustomization
+        run: |
+          cd .opsera-sperivote11/k8s/overlays/${{ env.ENVIRONMENT }}
+          sed -i "s|newTag:.*|newTag: ${{ needs.build.outputs.image_tag }}|g" kustomization.yaml
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .opsera-sperivote11/
+          git diff --cached --quiet || git commit -m "deploy(sperivote11-dev): ${{ needs.build.outputs.image_tag }} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Trigger ArgoCD Sync
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl annotate application ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -n argocd argocd.argoproj.io/refresh=hard --overwrite
+
+      - name: Verify Deployment
+        id: verify
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+
+          for i in {1..40}; do
+            VOTE=$(kubectl get deploy vote -n $NS -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            RESULT=$(kubectl get deploy result -n $NS -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            WORKER=$(kubectl get deploy worker -n $NS -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+
+            echo "Vote: ${VOTE:-0}, Result: ${RESULT:-0}, Worker: ${WORKER:-0}"
+
+            if [ "${VOTE:-0}" -ge 1 ] && [ "${RESULT:-0}" -ge 1 ] && [ "${WORKER:-0}" -ge 1 ]; then
+              echo "✅ All services ready!" >> $GITHUB_STEP_SUMMARY
+              echo "success=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "success=false" >> $GITHUB_OUTPUT
+
+  notify:
+    name: "📢 Notify"
+    needs: [deploy]
+    if: always() && needs.deploy.outputs.success == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack
+        if: env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: '{"text":"❌ sperivote11-dev deployment failed"}'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

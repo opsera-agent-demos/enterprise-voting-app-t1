@@ -1,0 +1,9 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY vote/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+COPY vote/ .
+ENV REDIS_HOST="" REDIS_PORT="6379" OPTION_A="Cats" OPTION_B="Dogs"
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD curl -f http://localhost:80/ || exit 1
+CMD ["gunicorn", "app:app", "-b", "0.0.0.0:80", "--workers", "4"]

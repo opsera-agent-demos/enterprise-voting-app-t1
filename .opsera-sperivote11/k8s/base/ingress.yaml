@@ -1,0 +1,32 @@
+# RULE 104: No TLS - handled at Ingress Controller level
+# RULE 105: Both ingressClassName AND annotation required
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sperivote11-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: vote-sperivote11-dev.agent.opsera.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vote
+                port:
+                  number: 80
+    - host: result-sperivote11-dev.agent.opsera.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: result
+                port:
+                  number: 80

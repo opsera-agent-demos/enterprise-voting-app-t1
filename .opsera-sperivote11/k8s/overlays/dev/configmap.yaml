@@ -1,0 +1,12 @@
+# Environment-specific ConfigMap for DEV
+# Endpoints populated by bootstrap workflow
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sperivote11-config
+  labels:
+    app.kubernetes.io/part-of: sperivote11
+    environment: dev
+data:
+  REDIS_HOST: "PLACEHOLDER_REDIS_HOST"
+  DATABASE_HOST: "PLACEHOLDER_DATABASE_HOST"

@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app: worker
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/part-of: sperivote11
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      serviceAccountName: worker
+      containers:
+        - name: worker
+          image: PLACEHOLDER_WORKER_IMAGE
+          imagePullPolicy: Always
+          env:
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: sperivote11-config
+                  key: DATABASE_HOST
+            - name: DATABASE_PORT
+              value: "5432"
+            - name: DATABASE_NAME
+              value: "votes"
+            - name: DATABASE_USER
+              value: "app_user"
+            - name: DATABASE_USE_IAM_AUTH
+              value: "true"
+            - name: AWS_REGION
+              value: "us-west-2"
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: sperivote11-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              value: "6379"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi

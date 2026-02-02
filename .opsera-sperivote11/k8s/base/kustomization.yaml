@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+commonLabels:
+  app.kubernetes.io/managed-by: argocd
+  app.kubernetes.io/part-of: sperivote11
+
+resources:
+  - namespace.yaml
+  - vote-deployment.yaml
+  - vote-service.yaml
+  - result-deployment.yaml
+  - result-service.yaml
+  - worker-deployment.yaml
+  - ingress.yaml
+# ConfigMap and ServiceAccounts are in overlays (environment-specific)

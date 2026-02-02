@@ -1,0 +1,102 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# E2E TEST - sperivote11
+# Simulates voting and verifies end-to-end functionality
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "E2E Test (sperivote11)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      cats_votes:
+        description: 'Votes for Cats'
+        type: number
+        default: 7
+      dogs_votes:
+        description: 'Votes for Dogs'
+        type: number
+        default: 3
+
+env:
+  VOTE_URL: https://vote-sperivote11-dev.agent.opsera.dev
+  RESULT_URL: https://result-sperivote11-dev.agent.opsera.dev
+
+jobs:
+  e2e-test:
+    name: "🧪 E2E Test"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health Check
+        id: health
+        run: |
+          echo "### 🧪 E2E Test - sperivote11" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          VOTE_HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.VOTE_URL }}/" --max-time 15 || echo "000")
+          RESULT_HTTP=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.RESULT_URL }}/" --max-time 15 || echo "000")
+
+          echo "#### Health Check" >> $GITHUB_STEP_SUMMARY
+          echo "- Vote App: HTTP ${VOTE_HTTP}" >> $GITHUB_STEP_SUMMARY
+          echo "- Result App: HTTP ${RESULT_HTTP}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "vote_status=${VOTE_HTTP}" >> $GITHUB_OUTPUT
+          echo "result_status=${RESULT_HTTP}" >> $GITHUB_OUTPUT
+
+          if [ "$RESULT_HTTP" != "200" ]; then
+            echo "::error::Result app not available (HTTP ${RESULT_HTTP})"
+            exit 1
+          fi
+
+      - name: Vote for Cats
+        run: |
+          echo "#### Voting Simulation" >> $GITHUB_STEP_SUMMARY
+          SUCCESS=0
+          for i in $(seq 1 ${{ inputs.cats_votes }}); do
+            HTTP=$(curl -s -X POST "${{ env.VOTE_URL }}/" -d "vote=a" -c /tmp/cat$i -b /tmp/cat$i -w "%{http_code}" -o /dev/null --max-time 5 2>/dev/null || echo "000")
+            [ "$HTTP" = "200" ] || [ "$HTTP" = "302" ] && SUCCESS=$((SUCCESS + 1))
+            sleep 0.3
+          done
+          echo "- 🐱 Cats: ${SUCCESS}/${{ inputs.cats_votes }} votes submitted" >> $GITHUB_STEP_SUMMARY
+
+      - name: Vote for Dogs
+        run: |
+          SUCCESS=0
+          for i in $(seq 1 ${{ inputs.dogs_votes }}); do
+            HTTP=$(curl -s -X POST "${{ env.VOTE_URL }}/" -d "vote=b" -c /tmp/dog$i -b /tmp/dog$i -w "%{http_code}" -o /dev/null --max-time 5 2>/dev/null || echo "000")
+            [ "$HTTP" = "200" ] || [ "$HTTP" = "302" ] && SUCCESS=$((SUCCESS + 1))
+            sleep 0.3
+          done
+          echo "- 🐶 Dogs: ${SUCCESS}/${{ inputs.dogs_votes }} votes submitted" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait & Verify
+        run: |
+          sleep 3
+
+          TOTAL=$(( ${{ inputs.cats_votes }} + ${{ inputs.dogs_votes }} ))
+          CAT_PCT=$(echo "scale=0; ${{ inputs.cats_votes }} * 100 / $TOTAL" | bc)
+          DOG_PCT=$(echo "scale=0; ${{ inputs.dogs_votes }} * 100 / $TOTAL" | bc)
+
+          echo "#### Expected Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Option | Votes | Expected % |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🐱 Cats | ${{ inputs.cats_votes }} | ~${CAT_PCT}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🐶 Dogs | ${{ inputs.dogs_votes }} | ~${DOG_PCT}% |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Verify result page loads
+          RESULT_HTML=$(curl -s "${{ env.RESULT_URL }}/" --max-time 10)
+          if echo "$RESULT_HTML" | grep -q "Cats vs Dogs"; then
+            echo "✅ **Result page verified!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Result page content unexpected" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Summary
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "**Endpoints:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Vote: ${{ env.VOTE_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Result: ${{ env.RESULT_URL }}" >> $GITHUB_STEP_SUMMARY

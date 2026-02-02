@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: result
+  labels:
+    app: result
+    app.kubernetes.io/name: result
+    app.kubernetes.io/part-of: sperivote11
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: result
+  template:
+    metadata:
+      labels:
+        app: result
+    spec:
+      serviceAccountName: result
+      containers:
+        - name: result
+          image: PLACEHOLDER_RESULT_IMAGE
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          env:
+            - name: DATABASE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: sperivote11-config
+                  key: DATABASE_HOST
+            - name: DATABASE_PORT
+              value: "5432"
+            - name: DATABASE_NAME
+              value: "votes"
+            - name: DATABASE_USER
+              value: "app_user"
+            - name: DATABASE_USE_IAM_AUTH
+              value: "true"
+            - name: AWS_REGION
+              value: "us-west-2"
+            - name: PORT
+              value: "80"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 20
+            periodSeconds: 20

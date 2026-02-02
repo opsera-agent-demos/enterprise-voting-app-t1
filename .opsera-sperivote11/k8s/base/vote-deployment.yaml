@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vote
+  labels:
+    app: vote
+    app.kubernetes.io/name: vote
+    app.kubernetes.io/part-of: sperivote11
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vote
+  template:
+    metadata:
+      labels:
+        app: vote
+    spec:
+      serviceAccountName: vote
+      containers:
+        - name: vote
+          image: PLACEHOLDER_VOTE_IMAGE
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          env:
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: sperivote11-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              value: "6379"
+            - name: OPTION_A
+              value: "Cats"
+            - name: OPTION_B
+              value: "Dogs"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20

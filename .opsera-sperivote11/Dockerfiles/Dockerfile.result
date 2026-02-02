@@ -1,0 +1,11 @@
+FROM node:18-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends tini curl && rm -rf /var/lib/apt/lists/*
+COPY result/package*.json ./
+RUN npm install --legacy-peer-deps
+COPY result/ .
+ENV PORT="80"
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD curl -f http://localhost:80/ || exit 1
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "server.js"]

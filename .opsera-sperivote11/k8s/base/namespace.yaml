@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sperivote11-dev
+  labels:
+    app.kubernetes.io/name: sperivote11
+    app.kubernetes.io/part-of: sperivote11

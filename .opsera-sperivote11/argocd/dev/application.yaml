@@ -1,0 +1,37 @@
+# RULE 59: Use destination.name for hub-spoke architecture
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sperivote11-dev
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: sperivote11
+    environment: dev
+    tenant: opsera
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/opsera-agentic/enterprise-voting-app-t1.git
+    targetRevision: main
+    path: .opsera-sperivote11/k8s/overlays/dev
+  destination:
+    name: opsera-usw2-np
+    namespace: sperivote11-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
