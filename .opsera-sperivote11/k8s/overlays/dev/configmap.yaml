@@ -10,6 +10,6 @@ metadata:
 data:
   REDIS_HOST: "sperivote11-dev-redis.2muj25.0001.usw2.cache.amazonaws.com"
   DATABASE_HOST: "sperivote11-dev-postgres.chwgk42cofpp.us-west-2.rds.amazonaws.com"
-  DATABASE_SECRET_ARN: "PLACEHOLDER_DATABASE_SECRET_ARN"
+  DATABASE_SECRET_ARN: "arn:aws:secretsmanager:us-west-2:792373136340:secret:sperivote11-dev-rds-master-jsPjfM"
   DATABASE_NAME: "votes"
   AWS_REGION: "us-west-2"
