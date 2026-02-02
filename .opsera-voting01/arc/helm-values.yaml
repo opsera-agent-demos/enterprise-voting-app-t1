@@ -1,0 +1,54 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# ACTIONS RUNNER CONTROLLER - Helm Values
+# Install with: helm install arc actions-runner-controller/actions-runner-controller -f helm-values.yaml -n actions-runner-system
+# ════════════════════════════════════════════════════════════════════════════════
+
+# Controller configuration
+replicaCount: 1
+
+# Sync period for checking GitHub API
+syncPeriod: 1m
+
+# Authentication - uses secret created separately
+authSecret:
+  create: false
+  name: controller-manager
+
+# GitHub Enterprise (leave empty for github.com)
+# githubEnterpriseServerURL: ""
+
+# Controller resources
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Metrics for monitoring
+metrics:
+  serviceMonitor:
+    enabled: false  # Enable if using Prometheus Operator
+
+# Log level
+logLevel: info
+
+# Runner image settings
+image:
+  actionsRunnerRepositoryAndTag: "summerwind/actions-runner:latest"
+  dindSidecarRepositoryAndTag: "docker:dind"
+
+# Priority class for controller (optional)
+# priorityClassName: system-cluster-critical
+
+# Node affinity for controller
+# affinity:
+#   nodeAffinity:
+#     requiredDuringSchedulingIgnoredDuringExecution:
+#       nodeSelectorTerms:
+#         - matchExpressions:
+#             - key: node-role
+#               operator: In
+#               values:
+#                 - management

@@ -18,6 +18,11 @@ on:
         type: choice
         options: ['blocking', 'non-blocking', 'skip']
         default: 'non-blocking'
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['self-hosted', 'github-hosted']
+        default: 'self-hosted'
   push:
     branches: [main]
     paths:
@@ -44,7 +49,7 @@ jobs:
 
   security-gitleaks:
     name: "🔒 Gitleaks"
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
     if: github.event.inputs.security_scan_mode != 'skip'
     continue-on-error: true
     steps:
@@ -63,7 +68,7 @@ jobs:
 
   quality-sonarqube:
     name: "📊 SonarQube"
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
     if: github.event.inputs.quality_gate_mode != 'skip'
     continue-on-error: true
     steps:
@@ -88,7 +93,7 @@ jobs:
 
   build:
     name: "🏗️ Build & Push"
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
     needs: [security-gitleaks, quality-sonarqube]
     if: always() && !contains(needs.*.result, 'failure')
     outputs:
@@ -188,7 +193,7 @@ jobs:
   deploy:
     name: "🚀 Deploy"
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
     outputs:
       success: ${{ steps.verify.outputs.success }}
     steps:
@@ -254,7 +259,7 @@ jobs:
     name: "📢 Slack"
     needs: [deploy]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
     steps:
       - name: Send Slack Notification
         if: env.SLACK_WEBHOOK_URL != ''
@@ -296,7 +301,7 @@ jobs:
     name: "📋 Jira"
     needs: [deploy]
     if: always() && needs.deploy.outputs.success == 'false'
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
     continue-on-error: true
     steps:
       - name: Create Jira Issue

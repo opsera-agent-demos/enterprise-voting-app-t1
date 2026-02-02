@@ -1,0 +1,272 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# SETUP ACTIONS RUNNER CONTROLLER
+# One-time setup for self-hosted GitHub Actions runners on EKS
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "🏃 Setup ARC Runners"
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        type: choice
+        options:
+          - install
+          - upgrade
+          - uninstall
+          - status
+        default: 'install'
+      github_app_id:
+        description: 'GitHub App ID (required for install)'
+        type: string
+        required: false
+      github_app_installation_id:
+        description: 'GitHub App Installation ID (required for install)'
+        type: string
+        required: false
+
+env:
+  APP_NAME: voting01
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  ARC_NAMESPACE: actions-runner-system
+  HELM_VERSION: "0.27.6"
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # TERRAFORM - Create IRSA Role
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  terraform:
+    name: "🏗️ IRSA Role"
+    runs-on: ubuntu-latest
+    if: inputs.action == 'install'
+    outputs:
+      arc_role_arn: ${{ steps.output.outputs.arc_role_arn }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.0"
+
+      - name: Terraform Init
+        working-directory: .opsera-voting01/arc/terraform
+        run: terraform init -backend-config="key=voting01/arc/terraform.tfstate"
+
+      - name: Terraform Apply
+        working-directory: .opsera-voting01/arc/terraform
+        run: terraform apply -var-file="arc.tfvars" -auto-approve
+
+      - name: Get Outputs
+        id: output
+        working-directory: .opsera-voting01/arc/terraform
+        run: |
+          echo "arc_role_arn=$(terraform output -raw arc_runner_role_arn)" >> $GITHUB_OUTPUT
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # INSTALL ARC
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  install-arc:
+    name: "📦 Install ARC"
+    runs-on: ubuntu-latest
+    needs: [terraform]
+    if: always() && inputs.action == 'install' && (needs.terraform.result == 'success' || needs.terraform.result == 'skipped')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubectl
+        run: aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: Create Namespace
+        run: |
+          kubectl apply -f .opsera-voting01/arc/namespace.yaml
+          echo "✅ Namespace created" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create GitHub App Secret
+        run: |
+          # Check if secret exists
+          if kubectl get secret controller-manager -n ${{ env.ARC_NAMESPACE }} 2>/dev/null; then
+            echo "Secret already exists, updating..."
+            kubectl delete secret controller-manager -n ${{ env.ARC_NAMESPACE }}
+          fi
+
+          # Create secret from GitHub App credentials
+          kubectl create secret generic controller-manager \
+            -n ${{ env.ARC_NAMESPACE }} \
+            --from-literal=github_app_id="${{ inputs.github_app_id || secrets.GH_APP_ID }}" \
+            --from-literal=github_app_installation_id="${{ inputs.github_app_installation_id || secrets.GH_APP_INSTALLATION_ID }}" \
+            --from-literal=github_app_private_key="${{ secrets.GH_APP_PRIVATE_KEY }}"
+
+          echo "✅ GitHub App secret created" >> $GITHUB_STEP_SUMMARY
+
+      - name: Add Helm Repo
+        run: |
+          helm repo add actions-runner-controller https://actions-runner-controller.github.io/actions-runner-controller
+          helm repo update
+
+      - name: Install ARC Controller
+        run: |
+          helm upgrade --install arc actions-runner-controller/actions-runner-controller \
+            -n ${{ env.ARC_NAMESPACE }} \
+            -f .opsera-voting01/arc/helm-values.yaml \
+            --version ${{ env.HELM_VERSION }} \
+            --wait --timeout 5m
+
+          echo "✅ ARC Controller installed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait for Controller Ready
+        run: |
+          echo "Waiting for ARC controller to be ready..."
+          kubectl rollout status deployment/arc-actions-runner-controller -n ${{ env.ARC_NAMESPACE }} --timeout=120s
+          echo "✅ Controller ready" >> $GITHUB_STEP_SUMMARY
+
+      - name: Update Service Account with IRSA
+        if: needs.terraform.outputs.arc_role_arn != ''
+        run: |
+          ROLE_ARN="${{ needs.terraform.outputs.arc_role_arn }}"
+          sed -i "s|PLACEHOLDER_ARC_RUNNER_IRSA_ROLE|${ROLE_ARN}|g" .opsera-voting01/arc/serviceaccount.yaml
+          kubectl apply -f .opsera-voting01/arc/serviceaccount.yaml
+          echo "✅ Service account configured with IRSA" >> $GITHUB_STEP_SUMMARY
+
+      - name: Deploy Runners
+        run: |
+          kubectl apply -f .opsera-voting01/arc/runner-deployment.yaml
+          echo "✅ Runner deployment created" >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait for Runners
+        run: |
+          echo "Waiting for runners to register..."
+          for i in {1..30}; do
+            READY=$(kubectl get runnerdeployment opsera-org-runners -n ${{ env.ARC_NAMESPACE }} -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo "0")
+            echo "Ready runners: ${READY:-0}"
+            [ "${READY:-0}" -ge 1 ] && break
+            sleep 10
+          done
+
+      - name: Summary
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎉 ARC Installation Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Runner Status" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get runnerdeployment -n ${{ env.ARC_NAMESPACE }} >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pods" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n ${{ env.ARC_NAMESPACE }} >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Verify runners in GitHub: Settings → Actions → Runners" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run bootstrap: \`gh workflow run 00-bootstrap-infrastructure-voting01.yaml\`" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # STATUS CHECK
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  status:
+    name: "📊 Status"
+    runs-on: ubuntu-latest
+    if: inputs.action == 'status'
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubectl
+        run: aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: Check Status
+        run: |
+          echo "## 📊 ARC Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Controller" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get deployment -n ${{ env.ARC_NAMESPACE }} 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Not installed" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Runner Deployments" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get runnerdeployment -n ${{ env.ARC_NAMESPACE }} 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No runners" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Runner Pods" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n ${{ env.ARC_NAMESPACE }} -l app.kubernetes.io/component=runner 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "No runner pods" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # UNINSTALL
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  uninstall:
+    name: "🗑️ Uninstall"
+    runs-on: ubuntu-latest
+    if: inputs.action == 'uninstall'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup kubectl
+        run: aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+
+      - name: Delete Runners
+        run: |
+          kubectl delete -f .opsera-voting01/arc/runner-deployment.yaml --ignore-not-found
+          echo "✅ Runners deleted" >> $GITHUB_STEP_SUMMARY
+
+      - name: Uninstall ARC
+        run: |
+          helm uninstall arc -n ${{ env.ARC_NAMESPACE }} || true
+          echo "✅ ARC uninstalled" >> $GITHUB_STEP_SUMMARY
+
+      - name: Delete Namespace
+        run: |
+          kubectl delete namespace ${{ env.ARC_NAMESPACE }} --ignore-not-found
+          echo "✅ Namespace deleted" >> $GITHUB_STEP_SUMMARY
+
+      - name: Destroy Terraform
+        working-directory: .opsera-voting01/arc/terraform
+        run: |
+          terraform init -backend-config="key=voting01/arc/terraform.tfstate"
+          terraform destroy -var-file="arc.tfvars" -auto-approve || true
+          echo "✅ IRSA role deleted" >> $GITHUB_STEP_SUMMARY

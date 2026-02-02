@@ -1,0 +1,91 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# RUNNER DEPLOYMENT - Organization-level runners
+# Supports Docker-in-Docker for container builds
+# ════════════════════════════════════════════════════════════════════════════════
+
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: RunnerDeployment
+metadata:
+  name: opsera-org-runners
+  namespace: actions-runner-system
+spec:
+  replicas: 2
+  template:
+    spec:
+      # Organization-level runner
+      organization: opsera-agent-demos
+
+      # Labels for workflow targeting
+      labels:
+        - self-hosted
+        - linux
+        - x64
+        - opsera
+        - eks
+
+      # Enable Docker-in-Docker for container builds
+      dockerEnabled: true
+      dockerMTU: 1400
+
+      # Runner group (optional - create in GitHub org settings)
+      # group: default
+
+      # Ephemeral runners (recommended for security)
+      ephemeral: true
+
+      # Service account with AWS permissions
+      serviceAccountName: arc-runner
+
+      # Resource allocation
+      resources:
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+
+      # Node selector (optional - run on specific nodes)
+      # nodeSelector:
+      #   node-role: ci-runners
+
+      # Tolerations for dedicated CI nodes (optional)
+      # tolerations:
+      #   - key: "ci-runner"
+      #     operator: "Equal"
+      #     value: "true"
+      #     effect: "NoSchedule"
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# HORIZONTAL RUNNER AUTOSCALER
+# Scale runners based on workflow queue
+# ════════════════════════════════════════════════════════════════════════════════
+
+apiVersion: actions.summerwind.dev/v1alpha1
+kind: HorizontalRunnerAutoscaler
+metadata:
+  name: opsera-runner-autoscaler
+  namespace: actions-runner-system
+spec:
+  scaleTargetRef:
+    kind: RunnerDeployment
+    name: opsera-org-runners
+
+  # Scale between 1 and 5 runners
+  minReplicas: 1
+  maxReplicas: 5
+
+  # Scale based on workflow runs
+  scaleUpTriggers:
+    - githubEvent:
+        workflowJob: {}
+      duration: "30m"
+
+  # Metric-based scaling
+  metrics:
+    - type: TotalNumberOfQueuedAndInProgressWorkflowRuns
+      scaleUpThreshold: "1"
+      scaleDownThreshold: "0"
+      scaleUpFactor: "2"
+      scaleDownFactor: "0.5"

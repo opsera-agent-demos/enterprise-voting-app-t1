@@ -1,0 +1,12 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# ACTIONS RUNNER CONTROLLER - Namespace
+# Self-hosted GitHub Actions runners on Kubernetes
+# ════════════════════════════════════════════════════════════════════════════════
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: actions-runner-system
+  labels:
+    app.kubernetes.io/name: actions-runner-controller
+    app.kubernetes.io/component: runners
