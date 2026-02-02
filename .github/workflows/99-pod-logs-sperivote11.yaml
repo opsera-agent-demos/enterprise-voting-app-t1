@@ -47,8 +47,16 @@ jobs:
           echo "=== WORKER ENV ==="
           kubectl exec -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} deploy/worker -- env | grep -E "(DATABASE|AWS|REDIS)" || echo "Could not get env"
 
-      - name: Restart Result Pod
+      - name: Fix RDS Connection Pool
         run: |
-          echo "Restarting Result deployment..."
-          kubectl rollout restart deployment/result -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}
-          kubectl rollout status deployment/result -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --timeout=60s
+          echo "Scaling down result to clear RDS connections..."
+          kubectl scale deployment/result -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --replicas=0
+          kubectl scale deployment/worker -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --replicas=0
+          echo "Waiting 30s for connections to clear..."
+          sleep 30
+          echo "Scaling back up..."
+          kubectl scale deployment/worker -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --replicas=1
+          sleep 5
+          kubectl scale deployment/result -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --replicas=1
+          kubectl rollout status deployment/result -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --timeout=90s
+          kubectl rollout status deployment/worker -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --timeout=90s
