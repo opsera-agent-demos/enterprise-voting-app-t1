@@ -11,6 +11,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.5"
+    }
   }
 
   backend "s3" {
@@ -166,6 +170,26 @@ resource "aws_db_subnet_group" "main" {
   subnet_ids = data.aws_subnets.private.ids
 }
 
+resource "random_password" "rds_master" {
+  length  = 32
+  special = false  # RDS has limited special char support
+}
+
+resource "aws_secretsmanager_secret" "rds_master" {
+  name                    = "${local.name_prefix}-rds-master"
+  recovery_window_in_days = 0  # Allow immediate deletion for dev
+}
+
+resource "aws_secretsmanager_secret_version" "rds_master" {
+  secret_id = aws_secretsmanager_secret.rds_master.id
+  secret_string = jsonencode({
+    username = "postgres_admin"
+    password = random_password.rds_master.result
+    host     = aws_db_instance.postgres.address
+    database = "votes"
+  })
+}
+
 resource "aws_db_instance" "postgres" {
   identifier     = "${local.name_prefix}-postgres"
   engine         = "postgres"
@@ -176,7 +200,7 @@ resource "aws_db_instance" "postgres" {
 
   db_name  = "votes"
   username = "postgres_admin"
-  password = "SpriVote11Dev2026!"
+  password = random_password.rds_master.result
 
   iam_database_authentication_enabled = true
   vpc_security_group_ids = [aws_security_group.rds.id]
@@ -279,6 +303,37 @@ resource "aws_iam_role" "worker" {
       Condition = { StringEquals = { "${local.oidc_provider_url}:aud" = "sts.amazonaws.com", "${local.oidc_provider_url}:sub" = "system:serviceaccount:${local.namespace}:worker" } }
     }]
   })
+}
+
+# IRSA Role for Database Init Job - can read RDS master password from Secrets Manager
+resource "aws_iam_role" "db_init" {
+  name = "${local.name_prefix}-db-init-irsa"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = { Federated = local.oidc_provider_arn }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = { StringEquals = { "${local.oidc_provider_url}:aud" = "sts.amazonaws.com", "${local.oidc_provider_url}:sub" = "system:serviceaccount:${local.namespace}:db-init" } }
+    }]
+  })
+}
+
+resource "aws_iam_policy" "secrets_read" {
+  name = "${local.name_prefix}-secrets-read"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = [aws_secretsmanager_secret.rds_master.arn]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "db_init_secrets" {
+  role       = aws_iam_role.db_init.name
+  policy_arn = aws_iam_policy.secrets_read.arn
 }
 
 # RDS IAM Auth Policy

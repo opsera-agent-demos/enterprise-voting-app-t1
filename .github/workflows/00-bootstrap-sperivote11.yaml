@@ -153,28 +153,45 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Get RDS Endpoint
-        id: rds
+      - name: Get Terraform Outputs
+        id: tf
         working-directory: .opsera-sperivote11/terraform
         run: |
           terraform init -backend-config="key=sperivote11/dev/terraform.tfstate"
-          echo "host=$(terraform output -raw rds_address)" >> $GITHUB_OUTPUT
+          echo "rds_host=$(terraform output -raw rds_address)" >> $GITHUB_OUTPUT
+          echo "secret_arn=$(terraform output -raw rds_master_secret_arn)" >> $GITHUB_OUTPUT
+          echo "db_init_role=$(terraform output -raw irsa_db_init_role_arn)" >> $GITHUB_OUTPUT
 
       - name: Setup kubectl for SPOKE cluster
         run: aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
 
-      - name: Create IAM Database User via K8s Job
+      - name: Create DB Init ServiceAccount with IRSA
         env:
-          RDS_HOST: ${{ steps.rds.outputs.host }}
-          DB_PASSWORD: ${{ secrets.RDS_MASTER_PASSWORD }}
+          DB_INIT_ROLE: ${{ steps.tf.outputs.db_init_role }}
         run: |
           # Create namespace if not exists
           kubectl create namespace ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --dry-run=client -o yaml | kubectl apply -f -
 
+          # Create ServiceAccount with IRSA annotation (zero hardcoded credentials!)
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: db-init
+            namespace: ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}
+            annotations:
+              eks.amazonaws.com/role-arn: "${DB_INIT_ROLE}"
+          EOF
+
+      - name: Create IAM Database User via K8s Job (IRSA)
+        env:
+          RDS_HOST: ${{ steps.tf.outputs.rds_host }}
+          SECRET_ARN: ${{ steps.tf.outputs.secret_arn }}
+        run: |
           # Delete old job if exists
           kubectl delete job db-init-${{ env.APP_NAME }} -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --ignore-not-found
 
-          # Create and run database init job inside the cluster (has VPC access to RDS)
+          # Create job that uses IRSA to fetch credentials from Secrets Manager
           cat <<EOF | kubectl apply -f -
           apiVersion: batch/v1
           kind: Job
@@ -185,24 +202,37 @@ jobs:
             ttlSecondsAfterFinished: 300
             template:
               spec:
+                serviceAccountName: db-init
                 restartPolicy: Never
                 containers:
-                - name: psql
-                  image: postgres:15-alpine
+                - name: db-init
+                  image: amazon/aws-cli:2.15.0
                   env:
-                  - name: PGPASSWORD
-                    value: "${DB_PASSWORD}"
-                  - name: PGHOST
+                  - name: AWS_REGION
+                    value: "${{ env.AWS_REGION }}"
+                  - name: SECRET_ARN
+                    value: "${SECRET_ARN}"
+                  - name: RDS_HOST
                     value: "${RDS_HOST}"
-                  - name: PGUSER
-                    value: "postgres_admin"
-                  - name: PGDATABASE
-                    value: "votes"
                   command:
-                  - /bin/sh
+                  - /bin/bash
                   - -c
                   - |
-                    echo "Connecting to RDS at \${PGHOST}..."
+                    set -e
+                    echo "🔐 Fetching RDS credentials from Secrets Manager using IRSA..."
+
+                    # Install PostgreSQL client
+                    yum install -y postgresql15 > /dev/null 2>&1
+
+                    # Fetch credentials from Secrets Manager (uses IRSA - no hardcoded secrets!)
+                    SECRET=\$(aws secretsmanager get-secret-value --secret-id \${SECRET_ARN} --query SecretString --output text)
+                    export PGPASSWORD=\$(echo \${SECRET} | jq -r '.password')
+                    export PGUSER=\$(echo \${SECRET} | jq -r '.username')
+                    export PGHOST=\${RDS_HOST}
+                    export PGDATABASE="votes"
+
+                    echo "📊 Connecting to RDS at \${PGHOST} as \${PGUSER}..."
+
                     psql -c "
                     -- Create app_user if not exists
                     DO \\\$\\\$
@@ -216,7 +246,7 @@ jobs:
                     END
                     \\\$\\\$;
 
-                    -- Grant IAM authentication
+                    -- Grant IAM authentication (this enables IRSA for app_user)
                     GRANT rds_iam TO app_user;
 
                     -- Grant permissions
@@ -227,14 +257,14 @@ jobs:
                     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO app_user;
                     "
 
-                    echo "Verifying user creation..."
-                    psql -c "SELECT usename, usesuper, usecreatedb FROM pg_user WHERE usename = 'app_user';"
-                    echo "✅ Database user app_user configured successfully"
+                    echo "✅ Verifying user creation..."
+                    psql -c "SELECT usename FROM pg_user WHERE usename = 'app_user';"
+                    echo "🎉 Database user app_user configured with IAM authentication!"
           EOF
 
           # Wait for job to complete
           echo "Waiting for database init job to complete..."
-          kubectl wait --for=condition=complete job/db-init-${{ env.APP_NAME }} -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --timeout=120s
+          kubectl wait --for=condition=complete job/db-init-${{ env.APP_NAME }} -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --timeout=180s
 
           # Show job logs
           kubectl logs job/db-init-${{ env.APP_NAME }} -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}
