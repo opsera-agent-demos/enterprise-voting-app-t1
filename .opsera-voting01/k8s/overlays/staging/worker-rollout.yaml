@@ -32,7 +32,8 @@ spec:
               cpu: 500m
               memory: 512Mi
   strategy:
-    blueGreen:
-      activeService: worker
-      autoPromotionEnabled: true
-      scaleDownDelaySeconds: 60
+    canary:
+      steps:
+        - setWeight: 50
+        - pause: {duration: 1m}
+        - setWeight: 100
