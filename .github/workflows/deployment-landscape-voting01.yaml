@@ -1,6 +1,7 @@
 # ════════════════════════════════════════════════════════════════════════════════
-# DEPLOYMENT LANDSCAPE - voting01
-# Stakeholder dashboard with environment status
+# DEPLOYMENT LANDSCAPE REPORT - voting01
+# Comprehensive stakeholder dashboard with all environments, versions, and history
+# Triggers: After deployments, on schedule, or manual dispatch
 # ════════════════════════════════════════════════════════════════════════════════
 
 name: "📊 Landscape (voting01)"
@@ -9,6 +10,10 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 */6 * * *'  # Every 6 hours
+  push:
+    branches: [main]
+    paths:
+      - '.opsera-voting01/k8s/overlays/*/kustomization.yaml'
 
 env:
   APP_NAME: voting01
@@ -17,15 +22,142 @@ env:
   SPOKE_CLUSTER: opsera-usw2-np
 
 jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # COLLECT VERSION INFO FROM GIT
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  collect-versions:
+    name: "📦 Collect Versions"
+    runs-on: ubuntu-latest
+    outputs:
+      dev_version: ${{ steps.versions.outputs.dev_version }}
+      qa_version: ${{ steps.versions.outputs.qa_version }}
+      staging_version: ${{ steps.versions.outputs.staging_version }}
+      dev_deploy_time: ${{ steps.history.outputs.dev_deploy_time }}
+      dev_deploy_author: ${{ steps.history.outputs.dev_deploy_author }}
+      dev_source_author: ${{ steps.history.outputs.dev_source_author }}
+      qa_deploy_time: ${{ steps.history.outputs.qa_deploy_time }}
+      qa_deploy_author: ${{ steps.history.outputs.qa_deploy_author }}
+      qa_source_author: ${{ steps.history.outputs.qa_source_author }}
+      staging_deploy_time: ${{ steps.history.outputs.staging_deploy_time }}
+      staging_deploy_author: ${{ steps.history.outputs.staging_deploy_author }}
+      staging_source_author: ${{ steps.history.outputs.staging_source_author }}
+      dev_total_deploys: ${{ steps.stats.outputs.dev_total }}
+      qa_total_deploys: ${{ steps.stats.outputs.qa_total }}
+      staging_total_deploys: ${{ steps.stats.outputs.staging_total }}
+      unique_versions: ${{ steps.stats.outputs.unique_versions }}
+      versions_in_sync: ${{ steps.versions.outputs.in_sync }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract Current Versions
+        id: versions
+        run: |
+          # Extract versions from kustomization.yaml files
+          DEV_VERSION=$(grep -A2 'name: PLACEHOLDER_VOTE_IMAGE' .opsera-voting01/k8s/overlays/dev/kustomization.yaml | grep newTag | awk '{print $2}' || echo "unknown")
+          QA_VERSION=$(grep -A2 'name: PLACEHOLDER_VOTE_IMAGE' .opsera-voting01/k8s/overlays/qa/kustomization.yaml | grep newTag | awk '{print $2}' || echo "unknown")
+          STAGING_VERSION=$(grep -A2 'name: PLACEHOLDER_VOTE_IMAGE' .opsera-voting01/k8s/overlays/staging/kustomization.yaml | grep newTag | awk '{print $2}' || echo "unknown")
+
+          echo "dev_version=${DEV_VERSION}" >> $GITHUB_OUTPUT
+          echo "qa_version=${QA_VERSION}" >> $GITHUB_OUTPUT
+          echo "staging_version=${STAGING_VERSION}" >> $GITHUB_OUTPUT
+
+          # Check if all environments are in sync
+          if [ "$DEV_VERSION" == "$QA_VERSION" ] && [ "$QA_VERSION" == "$STAGING_VERSION" ]; then
+            echo "in_sync=true" >> $GITHUB_OUTPUT
+          else
+            echo "in_sync=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get Deployment History
+        id: history
+        run: |
+          # DEV deployment info
+          DEV_COMMIT=$(git log -1 --format="%H|%an|%ad" --date=iso -- ".opsera-voting01/k8s/overlays/dev/kustomization.yaml" 2>/dev/null || echo "|||")
+          echo "dev_deploy_time=$(echo $DEV_COMMIT | cut -d'|' -f3)" >> $GITHUB_OUTPUT
+          echo "dev_deploy_author=$(echo $DEV_COMMIT | cut -d'|' -f2)" >> $GITHUB_OUTPUT
+
+          # Get source commit author for DEV
+          DEV_VERSION="${{ steps.versions.outputs.dev_version || 'unknown' }}"
+          if [ "$DEV_VERSION" != "unknown" ]; then
+            SOURCE_SHA=$(echo $DEV_VERSION | cut -d'-' -f1)
+            SOURCE_AUTHOR=$(git show ${SOURCE_SHA} --format="%an" --no-patch 2>/dev/null || echo "Unknown")
+            echo "dev_source_author=${SOURCE_AUTHOR}" >> $GITHUB_OUTPUT
+          else
+            echo "dev_source_author=Unknown" >> $GITHUB_OUTPUT
+          fi
+
+          # QA deployment info
+          QA_COMMIT=$(git log -1 --format="%H|%an|%ad" --date=iso -- ".opsera-voting01/k8s/overlays/qa/kustomization.yaml" 2>/dev/null || echo "|||")
+          echo "qa_deploy_time=$(echo $QA_COMMIT | cut -d'|' -f3)" >> $GITHUB_OUTPUT
+          echo "qa_deploy_author=$(echo $QA_COMMIT | cut -d'|' -f2)" >> $GITHUB_OUTPUT
+
+          # Get source commit author for QA
+          QA_VERSION="${{ steps.versions.outputs.qa_version || 'unknown' }}"
+          if [ "$QA_VERSION" != "unknown" ]; then
+            SOURCE_SHA=$(echo $QA_VERSION | cut -d'-' -f1)
+            SOURCE_AUTHOR=$(git show ${SOURCE_SHA} --format="%an" --no-patch 2>/dev/null || echo "Unknown")
+            echo "qa_source_author=${SOURCE_AUTHOR}" >> $GITHUB_OUTPUT
+          else
+            echo "qa_source_author=Unknown" >> $GITHUB_OUTPUT
+          fi
+
+          # STAGING deployment info
+          STAGING_COMMIT=$(git log -1 --format="%H|%an|%ad" --date=iso -- ".opsera-voting01/k8s/overlays/staging/kustomization.yaml" 2>/dev/null || echo "|||")
+          echo "staging_deploy_time=$(echo $STAGING_COMMIT | cut -d'|' -f3)" >> $GITHUB_OUTPUT
+          echo "staging_deploy_author=$(echo $STAGING_COMMIT | cut -d'|' -f2)" >> $GITHUB_OUTPUT
+
+          # Get source commit author for STAGING
+          STAGING_VERSION="${{ steps.versions.outputs.staging_version || 'unknown' }}"
+          if [ "$STAGING_VERSION" != "unknown" ]; then
+            SOURCE_SHA=$(echo $STAGING_VERSION | cut -d'-' -f1)
+            SOURCE_AUTHOR=$(git show ${SOURCE_SHA} --format="%an" --no-patch 2>/dev/null || echo "Unknown")
+            echo "staging_source_author=${SOURCE_AUTHOR}" >> $GITHUB_OUTPUT
+          else
+            echo "staging_source_author=Unknown" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Calculate Statistics
+        id: stats
+        run: |
+          # Count deployments per environment
+          DEV_TOTAL=$(git log --all --oneline --grep="deploy(voting01-dev)" | wc -l | tr -d ' ')
+          QA_TOTAL=$(git log --all --oneline --grep="deploy(voting01-qa)" | wc -l | tr -d ' ')
+          STAGING_TOTAL=$(git log --all --oneline --grep="deploy(voting01-staging)" | wc -l | tr -d ' ')
+
+          echo "dev_total=${DEV_TOTAL}" >> $GITHUB_OUTPUT
+          echo "qa_total=${QA_TOTAL}" >> $GITHUB_OUTPUT
+          echo "staging_total=${STAGING_TOTAL}" >> $GITHUB_OUTPUT
+
+          # Count unique versions
+          UNIQUE=$(git log --all --oneline --grep="deploy(voting01" | sed -n 's/.*: \([a-f0-9]*-[0-9]*\).*/\1/p' | sort -u | wc -l | tr -d ' ')
+          echo "unique_versions=${UNIQUE}" >> $GITHUB_OUTPUT
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # COLLECT LIVE CLUSTER METRICS
+  # ═══════════════════════════════════════════════════════════════════════════════
+
   collect-metrics:
-    name: "📊 Collect Metrics"
+    name: "🔍 Collect Metrics"
     runs-on: ubuntu-latest
     outputs:
       dev_sync: ${{ steps.dev.outputs.sync }}
       dev_health: ${{ steps.dev.outputs.health }}
       dev_pods: ${{ steps.dev.outputs.pods }}
-      vote_status: ${{ steps.health.outputs.vote }}
-      result_status: ${{ steps.health.outputs.result }}
+      qa_sync: ${{ steps.qa.outputs.sync }}
+      qa_health: ${{ steps.qa.outputs.health }}
+      qa_pods: ${{ steps.qa.outputs.pods }}
+      staging_sync: ${{ steps.staging.outputs.sync }}
+      staging_health: ${{ steps.staging.outputs.health }}
+      staging_pods: ${{ steps.staging.outputs.pods }}
+      vote_dev_status: ${{ steps.health.outputs.vote_dev }}
+      result_dev_status: ${{ steps.health.outputs.result_dev }}
+      vote_qa_status: ${{ steps.health.outputs.vote_qa }}
+      result_qa_status: ${{ steps.health.outputs.result_qa }}
+      vote_staging_status: ${{ steps.health.outputs.vote_staging }}
+      result_staging_status: ${{ steps.health.outputs.result_staging }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,57 +183,333 @@ jobs:
           PODS=$(kubectl get pods -n ${{ env.APP_NAME }}-dev --no-headers 2>/dev/null | wc -l | tr -d ' ')
           echo "pods=${PODS}" >> $GITHUB_OUTPUT
 
-      - name: Health Checks
+      - name: QA Metrics
+        id: qa
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+          SYNC=$(kubectl get application ${{ env.APP_NAME }}-qa -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+          HEALTH=$(kubectl get application ${{ env.APP_NAME }}-qa -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+
+          echo "sync=${SYNC}" >> $GITHUB_OUTPUT
+          echo "health=${HEALTH}" >> $GITHUB_OUTPUT
+
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          PODS=$(kubectl get pods -n ${{ env.APP_NAME }}-qa --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          echo "pods=${PODS}" >> $GITHUB_OUTPUT
+
+      - name: STAGING Metrics
+        id: staging
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+          SYNC=$(kubectl get application ${{ env.APP_NAME }}-staging -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+          HEALTH=$(kubectl get application ${{ env.APP_NAME }}-staging -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+
+          echo "sync=${SYNC}" >> $GITHUB_OUTPUT
+          echo "health=${HEALTH}" >> $GITHUB_OUTPUT
+
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          PODS=$(kubectl get pods -n ${{ env.APP_NAME }}-staging --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          echo "pods=${PODS}" >> $GITHUB_OUTPUT
+
+      - name: Endpoint Health Checks
         id: health
         run: |
-          VOTE=$(curl -s -o /dev/null -w "%{http_code}" "https://vote-${{ env.APP_NAME }}-dev.agent.opsera.dev" --max-time 10 || echo "000")
-          RESULT=$(curl -s -o /dev/null -w "%{http_code}" "https://result-${{ env.APP_NAME }}-dev.agent.opsera.dev" --max-time 10 || echo "000")
+          # DEV endpoints
+          VOTE_DEV=$(curl -s -o /dev/null -w "%{http_code}" "https://vote-${{ env.APP_NAME }}-dev.agent.opsera.dev" --max-time 10 || echo "000")
+          RESULT_DEV=$(curl -s -o /dev/null -w "%{http_code}" "https://result-${{ env.APP_NAME }}-dev.agent.opsera.dev" --max-time 10 || echo "000")
+          echo "vote_dev=${VOTE_DEV}" >> $GITHUB_OUTPUT
+          echo "result_dev=${RESULT_DEV}" >> $GITHUB_OUTPUT
 
-          echo "vote=${VOTE}" >> $GITHUB_OUTPUT
-          echo "result=${RESULT}" >> $GITHUB_OUTPUT
+          # QA endpoints
+          VOTE_QA=$(curl -s -o /dev/null -w "%{http_code}" "https://vote-${{ env.APP_NAME }}-qa.agent.opsera.dev" --max-time 10 || echo "000")
+          RESULT_QA=$(curl -s -o /dev/null -w "%{http_code}" "https://result-${{ env.APP_NAME }}-qa.agent.opsera.dev" --max-time 10 || echo "000")
+          echo "vote_qa=${VOTE_QA}" >> $GITHUB_OUTPUT
+          echo "result_qa=${RESULT_QA}" >> $GITHUB_OUTPUT
+
+          # STAGING endpoints
+          VOTE_STAGING=$(curl -s -o /dev/null -w "%{http_code}" "https://vote-${{ env.APP_NAME }}-staging.agent.opsera.dev" --max-time 10 || echo "000")
+          RESULT_STAGING=$(curl -s -o /dev/null -w "%{http_code}" "https://result-${{ env.APP_NAME }}-staging.agent.opsera.dev" --max-time 10 || echo "000")
+          echo "vote_staging=${VOTE_STAGING}" >> $GITHUB_OUTPUT
+          echo "result_staging=${RESULT_STAGING}" >> $GITHUB_OUTPUT
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # GET DEPLOYMENT HISTORY
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  collect-history:
+    name: "📜 Collect History"
+    runs-on: ubuntu-latest
+    outputs:
+      recent_deploys: ${{ steps.history.outputs.recent }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Recent Deployments
+        id: history
+        run: |
+          # Get last 10 deployments with details
+          HISTORY=$(git log --all --format="%ad|%s|%an" --date=format:'%Y-%m-%d %H:%M' --grep="deploy(voting01" -10 | head -10)
+
+          # Store as base64 to preserve formatting
+          echo "recent<<EOF" >> $GITHUB_OUTPUT
+          echo "$HISTORY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # GENERATE COMPREHENSIVE REPORT
+  # ═══════════════════════════════════════════════════════════════════════════════
 
   generate-report:
     name: "📊 Generate Report"
-    needs: [collect-metrics]
+    needs: [collect-versions, collect-metrics, collect-history]
     runs-on: ubuntu-latest
     steps:
-      - name: Generate Dashboard
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Deployment Landscape Report
+        env:
+          DEV_VERSION: ${{ needs.collect-versions.outputs.dev_version }}
+          QA_VERSION: ${{ needs.collect-versions.outputs.qa_version }}
+          STAGING_VERSION: ${{ needs.collect-versions.outputs.staging_version }}
+          VERSIONS_IN_SYNC: ${{ needs.collect-versions.outputs.versions_in_sync }}
         run: |
-          echo "# 📊 voting01 Deployment Landscape" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "_Generated: $(date -u +'%Y-%m-%d %H:%M UTC')_" >> $GITHUB_STEP_SUMMARY
+          cat << 'HEADER' >> $GITHUB_STEP_SUMMARY
+          # 📊 Deployment Landscape Report
+
+          **Application:** `voting01` (Enterprise Voting App)
+          HEADER
+
+          echo "**Report Generated:** $(date -u +'%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Total Deployments:** $(( ${{ needs.collect-versions.outputs.dev_total_deploys }} + ${{ needs.collect-versions.outputs.qa_total_deploys }} + ${{ needs.collect-versions.outputs.staging_total_deploys }} ))" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          echo "## Environment Status" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Env | Sync | Health | Pods | Strategy |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|------|--------|------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| DEV | ${{ needs.collect-metrics.outputs.dev_sync }} | ${{ needs.collect-metrics.outputs.dev_health }} | ${{ needs.collect-metrics.outputs.dev_pods }} | Rolling |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "## Endpoint Health" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | URL | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Vote | https://vote-voting01-dev.agent.opsera.dev | HTTP ${{ needs.collect-metrics.outputs.vote_status }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Result | https://result-voting01-dev.agent.opsera.dev | HTTP ${{ needs.collect-metrics.outputs.result_status }} |" >> $GITHUB_STEP_SUMMARY
+          # Sync Status Banner
+          if [ "$VERSIONS_IN_SYNC" == "true" ]; then
+            echo "> ✅ **All environments are in sync** at version \`${DEV_VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "> ⚠️ **Environments are NOT in sync** - review version differences below" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          echo "## Architecture" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "User → Vote App → Redis → Worker → Postgres → Result App → User" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          echo "## Quick Commands" >> $GITHUB_STEP_SUMMARY
-          echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "# Run CI/CD" >> $GITHUB_STEP_SUMMARY
-          echo "gh workflow run \"ci-build-push-voting01-dev.yaml\"" >> $GITHUB_STEP_SUMMARY
+          # Environment Summary Table
+          echo "## 🌍 Environment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Run Diagnostics" >> $GITHUB_STEP_SUMMARY
-          echo "gh workflow run \"diagnostics-voting01.yaml\" -f diagnostic_type=full-pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Namespace | Current Version | Strategy | ArgoCD Sync | Health | Pods | Total Deploys |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|-----------|-----------------|----------|-------------|--------|------|---------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **DEV** | \`voting01-dev\` | \`${{ needs.collect-versions.outputs.dev_version }}\` | Rolling | ${{ needs.collect-metrics.outputs.dev_sync }} | ${{ needs.collect-metrics.outputs.dev_health }} | ${{ needs.collect-metrics.outputs.dev_pods }} | ${{ needs.collect-versions.outputs.dev_total_deploys }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **QA** | \`voting01-qa\` | \`${{ needs.collect-versions.outputs.qa_version }}\` | Canary | ${{ needs.collect-metrics.outputs.qa_sync }} | ${{ needs.collect-metrics.outputs.qa_health }} | ${{ needs.collect-metrics.outputs.qa_pods }} | ${{ needs.collect-versions.outputs.qa_total_deploys }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **STAGING** | \`voting01-staging\` | \`${{ needs.collect-versions.outputs.staging_version }}\` | Blue-Green | ${{ needs.collect-metrics.outputs.staging_sync }} | ${{ needs.collect-metrics.outputs.staging_health }} | ${{ needs.collect-metrics.outputs.staging_pods }} | ${{ needs.collect-versions.outputs.staging_total_deploys }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Endpoint Health
+          echo "## 🌐 Endpoint Health" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Vote App | Result App |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|----------|------------|" >> $GITHUB_STEP_SUMMARY
+
+          # DEV
+          VOTE_DEV="${{ needs.collect-metrics.outputs.vote_dev_status }}"
+          RESULT_DEV="${{ needs.collect-metrics.outputs.result_dev_status }}"
+          VOTE_DEV_ICON=$([[ "$VOTE_DEV" == "200" ]] && echo "✅" || echo "❌")
+          RESULT_DEV_ICON=$([[ "$RESULT_DEV" == "200" ]] && echo "✅" || echo "❌")
+          echo "| DEV | ${VOTE_DEV_ICON} [vote-voting01-dev](https://vote-voting01-dev.agent.opsera.dev) (HTTP ${VOTE_DEV}) | ${RESULT_DEV_ICON} [result-voting01-dev](https://result-voting01-dev.agent.opsera.dev) (HTTP ${RESULT_DEV}) |" >> $GITHUB_STEP_SUMMARY
+
+          # QA
+          VOTE_QA="${{ needs.collect-metrics.outputs.vote_qa_status }}"
+          RESULT_QA="${{ needs.collect-metrics.outputs.result_qa_status }}"
+          VOTE_QA_ICON=$([[ "$VOTE_QA" == "200" ]] && echo "✅" || echo "❌")
+          RESULT_QA_ICON=$([[ "$RESULT_QA" == "200" ]] && echo "✅" || echo "❌")
+          echo "| QA | ${VOTE_QA_ICON} [vote-voting01-qa](https://vote-voting01-qa.agent.opsera.dev) (HTTP ${VOTE_QA}) | ${RESULT_QA_ICON} [result-voting01-qa](https://result-voting01-qa.agent.opsera.dev) (HTTP ${RESULT_QA}) |" >> $GITHUB_STEP_SUMMARY
+
+          # STAGING
+          VOTE_STAGING="${{ needs.collect-metrics.outputs.vote_staging_status }}"
+          RESULT_STAGING="${{ needs.collect-metrics.outputs.result_staging_status }}"
+          VOTE_STAGING_ICON=$([[ "$VOTE_STAGING" == "200" ]] && echo "✅" || echo "❌")
+          RESULT_STAGING_ICON=$([[ "$RESULT_STAGING" == "200" ]] && echo "✅" || echo "❌")
+          echo "| STAGING | ${VOTE_STAGING_ICON} [vote-voting01-staging](https://vote-voting01-staging.agent.opsera.dev) (HTTP ${VOTE_STAGING}) | ${RESULT_STAGING_ICON} [result-voting01-staging](https://result-voting01-staging.agent.opsera.dev) (HTTP ${RESULT_STAGING}) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Deployment Details
+          echo "## 🚀 Current Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### DEV Environment" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ needs.collect-versions.outputs.dev_version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Last Deployed | ${{ needs.collect-versions.outputs.dev_deploy_time }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployed By | ${{ needs.collect-versions.outputs.dev_deploy_author }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Source Author | ${{ needs.collect-versions.outputs.dev_source_author }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### QA Environment" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ needs.collect-versions.outputs.qa_version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Last Deployed | ${{ needs.collect-versions.outputs.qa_deploy_time }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployed By | ${{ needs.collect-versions.outputs.qa_deploy_author }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Source Author | ${{ needs.collect-versions.outputs.qa_source_author }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Strategy | Canary (10% → 30% → 60% → 100%) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### STAGING Environment" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ needs.collect-versions.outputs.staging_version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Last Deployed | ${{ needs.collect-versions.outputs.staging_deploy_time }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployed By | ${{ needs.collect-versions.outputs.staging_deploy_author }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Source Author | ${{ needs.collect-versions.outputs.staging_source_author }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Strategy | Blue-Green with Preview URLs |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Version Sync Status
+          echo "## ✅ Environment Sync Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          DEV_VER="${{ needs.collect-versions.outputs.dev_version }}"
+          QA_VER="${{ needs.collect-versions.outputs.qa_version }}"
+          STAGING_VER="${{ needs.collect-versions.outputs.staging_version }}"
+
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$DEV_VER" == "$QA_VER" ]; then
+            echo "| DEV → QA version match | ✅ Synced |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| DEV → QA version match | ⚠️ Out of sync (DEV: \`$DEV_VER\`, QA: \`$QA_VER\`) |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "$QA_VER" == "$STAGING_VER" ]; then
+            echo "| QA → STAGING version match | ✅ Synced |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| QA → STAGING version match | ⚠️ Out of sync (QA: \`$QA_VER\`, STAGING: \`$STAGING_VER\`) |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "| Unique versions deployed | ${{ needs.collect-versions.outputs.unique_versions }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Recent Deployment History
+          echo "## 📜 Recent Deployment History" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Timestamp | Deployment | Author |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|------------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          # Parse and display recent deployments
+          git log --all --format="%ad|%s|%an" --date=format:'%Y-%m-%d %H:%M' --grep="deploy(voting01" -10 | while IFS='|' read -r timestamp message author; do
+            echo "| ${timestamp} | ${message} | ${author} |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Architecture
+          echo "## 🏗️ Architecture" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```mermaid' >> $GITHUB_STEP_SUMMARY
+          echo 'graph LR' >> $GITHUB_STEP_SUMMARY
+          echo '    subgraph "User Traffic"' >> $GITHUB_STEP_SUMMARY
+          echo '        U[Users]' >> $GITHUB_STEP_SUMMARY
+          echo '    end' >> $GITHUB_STEP_SUMMARY
+          echo '    subgraph "Ingress Layer"' >> $GITHUB_STEP_SUMMARY
+          echo '        NG[NGINX Ingress]' >> $GITHUB_STEP_SUMMARY
+          echo '    end' >> $GITHUB_STEP_SUMMARY
+          echo '    subgraph "Application Layer"' >> $GITHUB_STEP_SUMMARY
+          echo '        V[Vote App]' >> $GITHUB_STEP_SUMMARY
+          echo '        R[Result App]' >> $GITHUB_STEP_SUMMARY
+          echo '        W[Worker]' >> $GITHUB_STEP_SUMMARY
+          echo '    end' >> $GITHUB_STEP_SUMMARY
+          echo '    subgraph "Data Layer"' >> $GITHUB_STEP_SUMMARY
+          echo '        RD[(Redis)]' >> $GITHUB_STEP_SUMMARY
+          echo '        PG[(PostgreSQL)]' >> $GITHUB_STEP_SUMMARY
+          echo '    end' >> $GITHUB_STEP_SUMMARY
+          echo '    U --> NG' >> $GITHUB_STEP_SUMMARY
+          echo '    NG --> V' >> $GITHUB_STEP_SUMMARY
+          echo '    NG --> R' >> $GITHUB_STEP_SUMMARY
+          echo '    V --> RD' >> $GITHUB_STEP_SUMMARY
+          echo '    W --> RD' >> $GITHUB_STEP_SUMMARY
+          echo '    W --> PG' >> $GITHUB_STEP_SUMMARY
+          echo '    R --> PG' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "_Powered by Opsera Code-to-Cloud Enterprise_" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Quick Commands
+          echo "## 🛠️ Quick Commands" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# Run CI/CD Pipeline (DEV)" >> $GITHUB_STEP_SUMMARY
+          echo 'gh workflow run "ci-build-push-voting01-dev.yaml"' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Promote QA to Staging" >> $GITHUB_STEP_SUMMARY
+          echo 'gh workflow run "promote-voting01.yaml" -f source_env=qa -f target_env=staging' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Run Full Diagnostics" >> $GITHUB_STEP_SUMMARY
+          echo 'gh workflow run "diagnostics-voting01.yaml" -f diagnostic_type=full-pipeline' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Refresh This Report" >> $GITHUB_STEP_SUMMARY
+          echo 'gh workflow run "deployment-landscape-voting01.yaml"' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "_Powered by [Opsera](https://opsera.io) Code-to-Cloud Enterprise_" >> $GITHUB_STEP_SUMMARY
+
+      - name: Post to Slack (Optional)
+        if: always()
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "Slack webhook not configured - skipping notification"
+            exit 0
+          fi
+
+          SYNC_STATUS="${{ needs.collect-versions.outputs.versions_in_sync }}"
+          if [ "$SYNC_STATUS" == "true" ]; then
+            STATUS_EMOJI="✅"
+            STATUS_TEXT="All environments in sync"
+          else
+            STATUS_EMOJI="⚠️"
+            STATUS_TEXT="Environments out of sync"
+          fi
+
+          curl -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"text\": \"📊 *Deployment Landscape Report*\",
+              \"attachments\": [{
+                \"color\": \"$([ \"$SYNC_STATUS\" == \"true\" ] && echo \"good\" || echo \"warning\")\",
+                \"fields\": [
+                  {\"title\": \"Status\", \"value\": \"${STATUS_EMOJI} ${STATUS_TEXT}\", \"short\": true},
+                  {\"title\": \"DEV\", \"value\": \"\`${{ needs.collect-versions.outputs.dev_version }}\`\", \"short\": true},
+                  {\"title\": \"QA\", \"value\": \"\`${{ needs.collect-versions.outputs.qa_version }}\`\", \"short\": true},
+                  {\"title\": \"STAGING\", \"value\": \"\`${{ needs.collect-versions.outputs.staging_version }}\`\", \"short\": true}
+                ],
+                \"footer\": \"View full report in GitHub Actions\"
+              }]
+            }"
