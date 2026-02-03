@@ -100,7 +100,7 @@ button.b{
   display: block;
   height: 80px;
   width: 330px;
-  border: none;
+  border: 2mm solid gold;
   color: white;
   text-transform: uppercase;
   font-size:18px;
