@@ -1,6 +1,7 @@
-# Opsera Jira Integration - Session Learnings & Implementation Guide
+# Opsera Session Learnings & Implementation Guide
 
 > **Generated:** 2026-02-03
+> **Last Updated:** 2026-02-03
 > **Application:** voting01
 > **Environment:** dev
 
@@ -8,13 +9,120 @@
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Issues Encountered & Fixes](#issues-encountered--fixes)
-3. [Secrets Configuration](#secrets-configuration)
-4. [Jira Authentication Methods](#jira-authentication-methods)
-5. [Workflow Templates](#workflow-templates)
-6. [YAML Best Practices](#yaml-best-practices)
-7. [Testing & Verification](#testing--verification)
+1. [Complete Session History](#complete-session-history)
+2. [Overview](#overview)
+3. [Issues Encountered & Fixes](#issues-encountered--fixes)
+4. [Secrets Configuration](#secrets-configuration)
+5. [Jira Authentication Methods](#jira-authentication-methods)
+6. [Workflow Templates](#workflow-templates)
+7. [YAML Best Practices](#yaml-best-practices)
+8. [Testing & Verification](#testing--verification)
+9. [Changelog](#changelog)
+10. [How to Update This Guide](#how-to-update-this-guide)
+
+---
+
+## Complete Session History
+
+This section captures all work done during the session, organized chronologically.
+
+### Phase 1: Initial Deployment State & UI Changes
+
+| Commit | Description |
+|--------|-------------|
+| `b617d43` | Added rounded corners to voting buttons |
+| `f6487b9` | Added 2mm golden border to vote buttons |
+
+**Files Modified:**
+- `vote/templates/index.html`
+- `vote/static/stylesheets/style.css`
+
+### Phase 2: Deployment Landscape Enhancements
+
+| Commit | Description |
+|--------|-------------|
+| `772b13f` | Added Application Architecture & CI/CD Pipeline Flow diagrams (Mermaid) |
+| `66dc530` | Fixed GITHUB_STEP_SUMMARY heredoc escaping issues |
+| `db5b8fd` | Added last 5 deployments history for each environment |
+| `885ac64` | Fixed delimiter parsing in deployment history |
+| `c1d5721` | Added author name and relative time to deployment history |
+| `dfd2afd` | Added Last Deploy Status visualization with Jira integration |
+
+**Key Features Added:**
+- Mermaid diagrams for architecture visualization
+- Deployment history with author correlation
+- Relative timestamps ("2 hours ago")
+- Fixed `github-actions[bot]` showing as author → now shows actual code author
+
+**Author Correlation Fix:**
+```bash
+# Extract source commit SHA from image tag (format: sha-timestamp)
+SOURCE_SHA=$(echo "$MSG" | cut -d'-' -f1)
+# Look up original commit author
+AUTHOR=$(git log -1 --format="%an" "$SOURCE_SHA" 2>/dev/null || echo "Unknown")
+```
+
+### Phase 3: Jira Integration
+
+| Commit | Description |
+|--------|-------------|
+| `8b59d3d` | Created test Jira integration workflow with API v2 support |
+| `cdb86a0` | Added API key authentication for mock Jira |
+| `9d3579c` | Fixed AUTH_HEADER passing, use discovered project key |
+| `c66eba4` | Updated Jira integration for mock Jira compatibility |
+| `35173c0` | Fixed YAML syntax with heredoc for multi-line strings |
+| `8c9989f` | Added Jira ticket creation for SonarQube quality gate failures |
+| `adc6e65` | Fixed capturing SonarQube scan failures |
+
+**Key Learnings:**
+- Mock Jira uses API key auth (`X-API-Key` header), not Basic auth
+- API v2 uses plain text descriptions, v3 uses ADF format
+- Use `steps.scan.outcome` not `job.result` when `continue-on-error: true`
+- Rebuild AUTH_HEADER in each step (don't pass via GITHUB_ENV)
+
+### Phase 4: Testing & Verification
+
+| Commit | Description |
+|--------|-------------|
+| `809c1c2` | Version bump to v5 - test Jira integration |
+| `7df6b85` | Version bump to v8 - test with secrets |
+| `5f41090` | Version bump to v9 - test with JIRA_AUTH_TYPE=api-key |
+
+**Infrastructure Fixes:**
+| Commit | Description |
+|--------|-------------|
+| `a587f64` | Separate hosts for vote/result apps in Ingress |
+| `8dfcd38` | Added Redis/Postgres endpoints to ConfigMap |
+
+### Phase 5: Documentation
+
+| Commit | Description |
+|--------|-------------|
+| `08923f6` | Created `.opsera-learnings/jira-integration-guide.md` (this file) |
+
+### Summary of All Issues Resolved
+
+| # | Issue | Root Cause | Fix |
+|---|-------|------------|-----|
+| 1 | YAML multi-line parsing error | Improper multi-line string syntax | Use heredoc syntax |
+| 2 | Jira 401 "Not authenticated" | Mock Jira requires API key, not Basic auth | Add auth type detection |
+| 3 | API v2 vs v3 format differences | v3 uses ADF, mock uses v2 plain text | Use API v2 |
+| 4 | AUTH_HEADER not passing via GITHUB_ENV | Special characters (colons) cause issues | Rebuild in each step |
+| 5 | SonarQube failure not triggering Jira | `continue-on-error` makes job result 'success' | Use `steps.scan.outcome` |
+| 6 | Wrong project key (DEPLOY vs TEST) | Hardcoded key doesn't exist | Use configurable secret |
+| 7 | Author showing as "github-actions[bot]" | Deploy commits are by bot | Extract source SHA from image tag |
+
+### Files Modified in Session
+
+| Category | Files |
+|----------|-------|
+| **Voting App UI** | `vote/templates/index.html`, `vote/static/stylesheets/style.css` |
+| **CI/CD Pipeline** | `.github/workflows/ci-build-push-voting01-dev.yaml` |
+| **Landscape Dashboard** | `.github/workflows/deployment-landscape-voting01.yaml` |
+| **Jira Testing** | `.github/workflows/test-jira-integration.yaml` |
+| **Documentation** | `.opsera-learnings/jira-integration-guide.md` |
+
+---
 
 ---
 
@@ -754,4 +862,135 @@ gh run view <run-id> --log | grep "TEST-"
 
 ---
 
-*This document was auto-generated from session learnings. Update as new issues are discovered.*
+## Changelog
+
+Track all updates to this learning guide.
+
+| Date | Version | Changes |
+|------|---------|---------|
+| 2026-02-03 | 1.0 | Initial creation with Jira integration learnings |
+| 2026-02-03 | 1.1 | Added complete session history, UI changes, landscape enhancements |
+
+---
+
+## How to Update This Guide
+
+### Option 1: Manual Update
+
+Add new learnings directly to this file:
+
+```bash
+# Edit the file
+vi .opsera-learnings/jira-integration-guide.md
+
+# Commit changes
+git add .opsera-learnings/jira-integration-guide.md
+git commit -m "docs: Update learnings guide with [topic]"
+git push
+```
+
+### Option 2: Automated Update via Workflow
+
+A GitHub Actions workflow can be triggered to update this guide with recent session learnings.
+
+```yaml
+# .github/workflows/update-learnings.yaml
+name: "📚 Update Learnings Guide"
+
+on:
+  workflow_dispatch:
+    inputs:
+      section:
+        description: 'Section to update'
+        type: choice
+        options: ['session-history', 'issues', 'templates', 'all']
+        default: 'session-history'
+      learning_summary:
+        description: 'Summary of new learning (one line)'
+        type: string
+        required: true
+
+jobs:
+  update-learnings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update Learnings Guide
+        run: |
+          DATE=$(date -u +'%Y-%m-%d')
+          GUIDE=".opsera-learnings/jira-integration-guide.md"
+
+          # Get current version
+          CURRENT_VERSION=$(grep -E "^\| $DATE" "$GUIDE" | tail -1 | awk -F'|' '{print $3}' | tr -d ' ' || echo "1.0")
+          MAJOR=$(echo "$CURRENT_VERSION" | cut -d'.' -f1)
+          MINOR=$(echo "$CURRENT_VERSION" | cut -d'.' -f2)
+          NEW_VERSION="${MAJOR}.$((MINOR + 1))"
+
+          # Update Last Updated date
+          sed -i "s/^> \*\*Last Updated:\*\*.*/> **Last Updated:** $DATE/" "$GUIDE"
+
+          # Add changelog entry
+          CHANGELOG_LINE="| $DATE | $NEW_VERSION | ${{ github.event.inputs.learning_summary }} |"
+          sed -i "/^| Date | Version | Changes |/a\\$CHANGELOG_LINE" "$GUIDE"
+
+          echo "Updated to version $NEW_VERSION"
+
+      - name: Commit Changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .opsera-learnings/
+          git commit -m "docs: Update learnings guide - ${{ github.event.inputs.learning_summary }}" || echo "No changes"
+          git push
+```
+
+### Option 3: Claude Code Session Export
+
+At the end of each Claude Code session, export learnings:
+
+```
+User: export session learnings to .opsera-learnings/
+```
+
+Claude will:
+1. Review the session transcript
+2. Extract key issues, fixes, and patterns
+3. Update the guide with new content
+4. Commit and push changes
+
+### Recommended Update Cadence
+
+| Trigger | Action |
+|---------|--------|
+| End of major feature work | Export session learnings |
+| New issue discovered | Add to Issues section |
+| New workflow template | Add to Templates section |
+| Weekly | Review and consolidate learnings |
+
+### Template for Adding New Issues
+
+```markdown
+### Issue N: [Title]
+
+**Problem:** [What went wrong]
+
+**Error:**
+\`\`\`
+[Error message]
+\`\`\`
+
+**Root Cause:** [Why it happened]
+
+**Fix:** [How to resolve]
+
+\`\`\`yaml
+# Code example
+\`\`\`
+```
+
+---
+
+*This document is a living record of DevOps learnings. Update regularly to build institutional knowledge.*

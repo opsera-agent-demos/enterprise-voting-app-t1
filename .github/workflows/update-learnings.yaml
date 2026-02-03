@@ -1,0 +1,145 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# UPDATE LEARNINGS GUIDE
+# Workflow to periodically update the .opsera-learnings guide
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "📚 Update Learnings Guide"
+
+on:
+  workflow_dispatch:
+    inputs:
+      section:
+        description: 'Section to update'
+        type: choice
+        options: ['session-history', 'issues', 'templates', 'changelog-only']
+        default: 'changelog-only'
+      learning_summary:
+        description: 'Summary of new learning (one line)'
+        type: string
+        required: true
+      commit_range:
+        description: 'Commit range to analyze (e.g., HEAD~10..HEAD)'
+        type: string
+        default: 'HEAD~10..HEAD'
+
+  # Optional: Run weekly to remind about updates
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday at 9 AM UTC
+
+jobs:
+  update-learnings:
+    name: "📝 Update Guide"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Analyze Recent Commits
+        id: analyze
+        run: |
+          echo "### 📊 Recent Commits Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          COMMIT_RANGE="${{ github.event.inputs.commit_range || 'HEAD~10..HEAD' }}"
+
+          echo "**Commit Range:** \`$COMMIT_RANGE\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "| Commit | Message |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------|" >> $GITHUB_STEP_SUMMARY
+
+          git log --oneline $COMMIT_RANGE 2>/dev/null | while read line; do
+            SHA=$(echo "$line" | awk '{print $1}')
+            MSG=$(echo "$line" | cut -d' ' -f2-)
+            echo "| \`$SHA\` | $MSG |" >> $GITHUB_STEP_SUMMARY
+          done
+
+          # Count commits by type
+          FEATURES=$(git log --oneline $COMMIT_RANGE 2>/dev/null | grep -c "feat" || echo "0")
+          FIXES=$(git log --oneline $COMMIT_RANGE 2>/dev/null | grep -c "fix" || echo "0")
+          DOCS=$(git log --oneline $COMMIT_RANGE 2>/dev/null | grep -c "docs" || echo "0")
+          CHORE=$(git log --oneline $COMMIT_RANGE 2>/dev/null | grep -c "chore" || echo "0")
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Summary:** $FEATURES features, $FIXES fixes, $DOCS docs, $CHORE chores" >> $GITHUB_STEP_SUMMARY
+
+          echo "features=$FEATURES" >> $GITHUB_OUTPUT
+          echo "fixes=$FIXES" >> $GITHUB_OUTPUT
+
+      - name: Update Learnings Guide
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          DATE=$(date -u +'%Y-%m-%d')
+          GUIDE=".opsera-learnings/jira-integration-guide.md"
+
+          if [ ! -f "$GUIDE" ]; then
+            echo "Guide not found at $GUIDE"
+            exit 1
+          fi
+
+          # Update Last Updated date
+          sed -i "s/^> \*\*Last Updated:\*\*.*/> **Last Updated:** $DATE/" "$GUIDE"
+
+          # Get next version number
+          LAST_VERSION=$(grep -oP '\| \d+\.\d+' "$GUIDE" | tail -1 | tr -d '| ' || echo "1.0")
+          MAJOR=$(echo "$LAST_VERSION" | cut -d'.' -f1)
+          MINOR=$(echo "$LAST_VERSION" | cut -d'.' -f2)
+          NEW_VERSION="${MAJOR}.$((MINOR + 1))"
+
+          # Add changelog entry (insert after header row)
+          SUMMARY="${{ github.event.inputs.learning_summary }}"
+          # Escape special characters for sed
+          SUMMARY_ESCAPED=$(echo "$SUMMARY" | sed 's/[&/\]/\\&/g')
+
+          # Find the changelog table and add new entry
+          awk -v date="$DATE" -v version="$NEW_VERSION" -v summary="$SUMMARY_ESCAPED" '
+            /^\| Date \| Version \| Changes \|/ { print; getline; print; print "| " date " | " version " | " summary " |"; next }
+            { print }
+          ' "$GUIDE" > "${GUIDE}.tmp" && mv "${GUIDE}.tmp" "$GUIDE"
+
+          echo "### ✅ Guide Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** $NEW_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "- **Summary:** $SUMMARY" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate Weekly Summary
+        if: github.event_name == 'schedule'
+        run: |
+          echo "### 📅 Weekly Learnings Reminder" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This is a reminder to update the learnings guide with any new discoveries from the past week." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**To update manually:**" >> $GITHUB_STEP_SUMMARY
+          echo "1. Run this workflow with \`workflow_dispatch\`" >> $GITHUB_STEP_SUMMARY
+          echo "2. Provide a summary of the new learning" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Show commits from last week
+          echo "**Commits in the last 7 days:**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          git log --oneline --since="7 days ago" | head -20 >> $GITHUB_STEP_SUMMARY || echo "No commits in the last 7 days" >> $GITHUB_STEP_SUMMARY
+
+      - name: Commit Changes
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .opsera-learnings/
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            echo "### ℹ️ No Changes" >> $GITHUB_STEP_SUMMARY
+          else
+            git commit -m "$(cat <<'EOF'
+docs: Update learnings guide - ${{ github.event.inputs.learning_summary }}
+
+Co-Authored-By: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+EOF
+            )"
+            git push
+            echo "### ✅ Changes Committed" >> $GITHUB_STEP_SUMMARY
+          fi
