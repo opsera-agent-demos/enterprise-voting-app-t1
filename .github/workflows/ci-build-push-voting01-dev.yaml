@@ -657,21 +657,24 @@ jobs:
           PROJECT_KEY="${JIRA_PROJECT:-TEST}"
 
           # Build description
-          DESCRIPTION="Security scan detected vulnerabilities in container images for voting01-dev.
+          DESCRIPTION=$(cat << 'DESCEOF'
+          Security scan detected vulnerabilities in container images for voting01-dev.
 
-Vulnerability Summary:
-- Vote: ${{ needs.build.outputs.vote_critical }} Critical, ${{ needs.build.outputs.vote_high }} High
-- Result: ${{ needs.build.outputs.result_critical }} Critical, ${{ needs.build.outputs.result_high }} High
-- Worker: ${{ needs.build.outputs.worker_critical }} Critical, ${{ needs.build.outputs.worker_high }} High
-- TOTAL: ${TOTAL_CRIT} Critical, ${TOTAL_HIGH} High
+          Vulnerability Summary:
+          - Vote: ${{ needs.build.outputs.vote_critical }} Critical, ${{ needs.build.outputs.vote_high }} High
+          - Result: ${{ needs.build.outputs.result_critical }} Critical, ${{ needs.build.outputs.result_high }} High
+          - Worker: ${{ needs.build.outputs.worker_critical }} Critical, ${{ needs.build.outputs.worker_high }} High
+          - TOTAL: ${TOTAL_CRIT} Critical, ${TOTAL_HIGH} High
 
-Build Details:
-- Image Tag: ${{ needs.build.outputs.image_tag }}
-- Commit: ${{ github.sha }}
-- Branch: ${{ github.ref_name }}
-- Triggered by: ${{ github.actor }}
+          Build Details:
+          - Image Tag: ${{ needs.build.outputs.image_tag }}
+          - Commit: ${{ github.sha }}
+          - Branch: ${{ github.ref_name }}
+          - Triggered by: ${{ github.actor }}
 
-View full scan results: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          View full scan results: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DESCEOF
+          )
 
           # Create payload (API v2 format)
           PAYLOAD=$(jq -n \
@@ -763,15 +766,18 @@ View full scan results: ${{ github.server_url }}/${{ github.repository }}/action
           PROJECT_KEY="${JIRA_PROJECT:-TEST}"
 
           # Build description
-          DESCRIPTION="Deployment failed for voting01-dev environment.
+          DESCRIPTION=$(cat << 'DESCEOF'
+          Deployment failed for voting01-dev environment.
 
-Details:
-- Image Tag: ${{ needs.build.outputs.image_tag }}
-- Commit: ${{ github.sha }}
-- Branch: ${{ github.ref_name }}
-- Triggered by: ${{ github.actor }}
+          Details:
+          - Image Tag: ${{ needs.build.outputs.image_tag }}
+          - Commit: ${{ github.sha }}
+          - Branch: ${{ github.ref_name }}
+          - Triggered by: ${{ github.actor }}
 
-Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DESCEOF
+          )
 
           # Create payload (API v2 format)
           PAYLOAD=$(jq -n \
