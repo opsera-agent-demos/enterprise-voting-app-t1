@@ -133,12 +133,13 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Application Architecture
+        env:
+          REPO_URL: https://github.com/${{ env.GITHUB_REPO }}
         run: |
-          REPO="https://github.com/${{ env.GITHUB_REPO }}"
-          cat << EOF >> \$GITHUB_STEP_SUMMARY
+          cat << 'MERMAID' >> $GITHUB_STEP_SUMMARY
           ## 🗳️ Application Architecture
 
-          \`\`\`mermaid
+          ```mermaid
           flowchart TB
               subgraph FRONTEND["Frontend Layer"]
                   VOTE["🗳️ Vote<br/>Python Flask<br/>Port 80"]
@@ -160,16 +161,16 @@ jobs:
               WORKER -->|"Read Votes"| REDIS
               WORKER -->|"Persist Votes"| POSTGRES
               RESULT -->|"Query Results"| POSTGRES
-          \`\`\`
+          ```
 
           ### Service Details
-          | Service | Language | Source | Dockerfile | Purpose |
-          |---------|----------|--------|------------|---------|
-          | 🗳️ Vote | Python 3.9 | [vote/](${REPO}/tree/main/vote) | [Dockerfile.vote](${REPO}/blob/main/.opsera-voting01/Dockerfiles/Dockerfile.vote) | Web UI for casting votes |
-          | 📊 Result | Node.js 18 | [result/](${REPO}/tree/main/result) | [Dockerfile.result](${REPO}/blob/main/.opsera-voting01/Dockerfiles/Dockerfile.result) | Real-time results dashboard |
-          | ⚙️ Worker | .NET 7 | [worker/](${REPO}/tree/main/worker) | [Dockerfile.worker](${REPO}/blob/main/.opsera-voting01/Dockerfiles/Dockerfile.worker) | Background vote processor |
-
-          EOF
+          MERMAID
+          echo "| Service | Language | Source | Dockerfile | Purpose |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|----------|--------|------------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🗳️ Vote | Python 3.9 | [vote/](${REPO_URL}/tree/main/vote) | [Dockerfile.vote](${REPO_URL}/blob/main/.opsera-voting01/Dockerfiles/Dockerfile.vote) | Web UI for casting votes |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📊 Result | Node.js 18 | [result/](${REPO_URL}/tree/main/result) | [Dockerfile.result](${REPO_URL}/blob/main/.opsera-voting01/Dockerfiles/Dockerfile.result) | Real-time results dashboard |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⚙️ Worker | .NET 7 | [worker/](${REPO_URL}/tree/main/worker) | [Dockerfile.worker](${REPO_URL}/blob/main/.opsera-voting01/Dockerfiles/Dockerfile.worker) | Background vote processor |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Infrastructure Architecture
         run: |
@@ -207,13 +208,14 @@ jobs:
           EOF
 
       - name: CI/CD Pipeline Flow
+        env:
+          REPO_URL: https://github.com/${{ env.GITHUB_REPO }}
         run: |
-          REPO="https://github.com/${{ env.GITHUB_REPO }}"
-          cat << EOF >> \$GITHUB_STEP_SUMMARY
+          cat << 'MERMAID' >> $GITHUB_STEP_SUMMARY
           ## 🔄 CI/CD Pipeline Flow
 
           ### DEV Pipeline (Auto-trigger on push)
-          \`\`\`mermaid
+          ```mermaid
           flowchart LR
               subgraph TRIGGER["Trigger"]
                   PUSH["📥 Push to main"]
@@ -247,10 +249,10 @@ jobs:
               B1 & B2 & B3 --> G1
               G1 --> ECR --> KUST --> ARGO
               ARGO --> SLACK & JIRA
-          \`\`\`
+          ```
 
           ### Environment Promotion
-          \`\`\`mermaid
+          ```mermaid
           flowchart LR
               subgraph DEV["🔧 DEV Environment"]
                   D1["CI Build DEV"]
@@ -274,17 +276,19 @@ jobs:
               Q1 --> Q2 --> Q3
               Q3 -->|"Approval Gate"| S1
               S1 --> S2 --> S3
-          \`\`\`
+          ```
 
           ### Workflow Files
-          | Pipeline | File | Trigger | Strategy |
-          |----------|------|---------|----------|
-          | DEV CI/CD | [ci-build-push-voting01-dev.yaml](${REPO}/blob/main/.github/workflows/ci-build-push-voting01-dev.yaml) | Push to main | Rolling |
-          | QA CI/CD | [ci-build-push-voting01-qa.yaml](${REPO}/blob/main/.github/workflows/ci-build-push-voting01-qa.yaml) | Manual / Dispatch | Canary |
-          | Staging CI/CD | [ci-build-push-voting01-staging.yaml](${REPO}/blob/main/.github/workflows/ci-build-push-voting01-staging.yaml) | Manual / Dispatch | Blue-Green |
-          | Promotion | [promote-voting01.yaml](${REPO}/blob/main/.github/workflows/promote-voting01.yaml) | Manual | Health Check + Dispatch |
-          | Bootstrap | [00-bootstrap-infrastructure-voting01.yaml](${REPO}/blob/main/.github/workflows/00-bootstrap-infrastructure-voting01.yaml) | Manual | Terraform + ArgoCD |
-          | Landscape | [deployment-landscape-voting01.yaml](${REPO}/blob/main/.github/workflows/deployment-landscape-voting01.yaml) | Schedule / Push | Report Only |
+          MERMAID
+          echo "| Pipeline | File | Trigger | Strategy |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|------|---------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| DEV CI/CD | [ci-build-push-voting01-dev.yaml](${REPO_URL}/blob/main/.github/workflows/ci-build-push-voting01-dev.yaml) | Push to main | Rolling |" >> $GITHUB_STEP_SUMMARY
+          echo "| QA CI/CD | [ci-build-push-voting01-qa.yaml](${REPO_URL}/blob/main/.github/workflows/ci-build-push-voting01-qa.yaml) | Manual / Dispatch | Canary |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging CI/CD | [ci-build-push-voting01-staging.yaml](${REPO_URL}/blob/main/.github/workflows/ci-build-push-voting01-staging.yaml) | Manual / Dispatch | Blue-Green |" >> $GITHUB_STEP_SUMMARY
+          echo "| Promotion | [promote-voting01.yaml](${REPO_URL}/blob/main/.github/workflows/promote-voting01.yaml) | Manual | Health Check + Dispatch |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bootstrap | [00-bootstrap-infrastructure-voting01.yaml](${REPO_URL}/blob/main/.github/workflows/00-bootstrap-infrastructure-voting01.yaml) | Manual | Terraform + ArgoCD |" >> $GITHUB_STEP_SUMMARY
+          echo "| Landscape | [deployment-landscape-voting01.yaml](${REPO_URL}/blob/main/.github/workflows/deployment-landscape-voting01.yaml) | Schedule / Push | Report Only |" >> $GITHUB_STEP_SUMMARY
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
 
           ### Pipeline Jobs Detail
           | Job | Purpose | Blocking | Outputs |
@@ -340,30 +344,31 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Quick Links
+        env:
+          REPO_URL: https://github.com/${{ env.GITHUB_REPO }}
         run: |
-          REPO="https://github.com/${{ env.GITHUB_REPO }}"
-          cat << EOF >> \$GITHUB_STEP_SUMMARY
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
           ## 🔗 Quick Links
 
           ### 🔧 Kubernetes Manifests
-          | Environment | Kustomization | ConfigMap | Deployment Base |
-          |-------------|---------------|-----------|-----------------|
-          | Base | [k8s/base](${REPO}/tree/main/.opsera-voting01/k8s/base) | - | [vote](${REPO}/blob/main/.opsera-voting01/k8s/base/vote-deployment.yaml) / [result](${REPO}/blob/main/.opsera-voting01/k8s/base/result-deployment.yaml) / [worker](${REPO}/blob/main/.opsera-voting01/k8s/base/worker-deployment.yaml) |
-          | DEV | [overlays/dev](${REPO}/tree/main/.opsera-voting01/k8s/overlays/dev) | [configmap](${REPO}/blob/main/.opsera-voting01/k8s/overlays/dev/configmap.yaml) | [kustomization](${REPO}/blob/main/.opsera-voting01/k8s/overlays/dev/kustomization.yaml) |
-          | QA | [overlays/qa](${REPO}/tree/main/.opsera-voting01/k8s/overlays/qa) | [configmap](${REPO}/blob/main/.opsera-voting01/k8s/overlays/qa/configmap.yaml) | [kustomization](${REPO}/blob/main/.opsera-voting01/k8s/overlays/qa/kustomization.yaml) |
-          | Staging | [overlays/staging](${REPO}/tree/main/.opsera-voting01/k8s/overlays/staging) | [configmap](${REPO}/blob/main/.opsera-voting01/k8s/overlays/staging/configmap.yaml) | [kustomization](${REPO}/blob/main/.opsera-voting01/k8s/overlays/staging/kustomization.yaml) |
-
-          ### ▶️ Run Workflows
-          | Action | Link |
-          |--------|------|
-          | 🔧 Deploy to DEV | [▶️ Run CI Build DEV](${REPO}/actions/workflows/ci-build-push-voting01-dev.yaml) |
-          | 🧪 Deploy to QA | [▶️ Run CI Build QA](${REPO}/actions/workflows/ci-build-push-voting01-qa.yaml) |
-          | 🎭 Deploy to Staging | [▶️ Run CI Build Staging](${REPO}/actions/workflows/ci-build-push-voting01-staging.yaml) |
-          | ⬆️ Promote Environment | [▶️ Run Promotion](${REPO}/actions/workflows/promote-voting01.yaml) |
-          | 🔍 Run Diagnostics | [▶️ Run Diagnostics](${REPO}/actions/workflows/diagnostics-voting01.yaml) |
-          | 📊 Refresh Landscape | [▶️ Run Landscape](${REPO}/actions/workflows/deployment-landscape-voting01.yaml) |
-
           EOF
+          echo "| Environment | Kustomization | ConfigMap | Deployment Base |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|---------------|-----------|-----------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Base | [k8s/base](${REPO_URL}/tree/main/.opsera-voting01/k8s/base) | - | [vote](${REPO_URL}/blob/main/.opsera-voting01/k8s/base/vote-deployment.yaml) / [result](${REPO_URL}/blob/main/.opsera-voting01/k8s/base/result-deployment.yaml) / [worker](${REPO_URL}/blob/main/.opsera-voting01/k8s/base/worker-deployment.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| DEV | [overlays/dev](${REPO_URL}/tree/main/.opsera-voting01/k8s/overlays/dev) | [configmap](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/dev/configmap.yaml) | [kustomization](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/dev/kustomization.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| QA | [overlays/qa](${REPO_URL}/tree/main/.opsera-voting01/k8s/overlays/qa) | [configmap](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/qa/configmap.yaml) | [kustomization](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/qa/kustomization.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging | [overlays/staging](${REPO_URL}/tree/main/.opsera-voting01/k8s/overlays/staging) | [configmap](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/staging/configmap.yaml) | [kustomization](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/staging/kustomization.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ▶️ Run Workflows" >> $GITHUB_STEP_SUMMARY
+          echo "| Action | Link |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔧 Deploy to DEV | [▶️ Run CI Build DEV](${REPO_URL}/actions/workflows/ci-build-push-voting01-dev.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Deploy to QA | [▶️ Run CI Build QA](${REPO_URL}/actions/workflows/ci-build-push-voting01-qa.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎭 Deploy to Staging | [▶️ Run CI Build Staging](${REPO_URL}/actions/workflows/ci-build-push-voting01-staging.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⬆️ Promote Environment | [▶️ Run Promotion](${REPO_URL}/actions/workflows/promote-voting01.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔍 Run Diagnostics | [▶️ Run Diagnostics](${REPO_URL}/actions/workflows/diagnostics-voting01.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📊 Refresh Landscape | [▶️ Run Landscape](${REPO_URL}/actions/workflows/deployment-landscape-voting01.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Live Endpoints
         run: |
