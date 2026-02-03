@@ -77,13 +77,20 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Test API connection by getting server info
+          echo "Making API call to ${JIRA_BASE_URL}/rest/api/3/serverInfo"
+
           RESPONSE=$(curl -s -w "\n%{http_code}" \
             -H "Authorization: Basic $(echo -n "${JIRA_EMAIL}:${JIRA_API_TOKEN}" | base64)" \
             -H "Content-Type: application/json" \
-            "${JIRA_BASE_URL}/rest/api/3/serverInfo")
+            "${JIRA_BASE_URL}/rest/api/3/serverInfo" 2>&1)
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP Code: $HTTP_CODE"
+          echo "Response Body: $BODY"
+
+          echo "**HTTP Code:** \`$HTTP_CODE\`" >> $GITHUB_STEP_SUMMARY
 
           if [ "$HTTP_CODE" = "200" ]; then
             echo "✅ **API Connection:** Success (HTTP $HTTP_CODE)" >> $GITHUB_STEP_SUMMARY
