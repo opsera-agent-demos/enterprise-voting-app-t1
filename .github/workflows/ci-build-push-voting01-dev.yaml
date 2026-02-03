@@ -286,8 +286,14 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup New Relic Secret
-        if: ${{ secrets.NEW_RELIC_LICENSE_KEY != '' }}
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
         run: |
+          if [ -z "$NEW_RELIC_LICENSE_KEY" ]; then
+            echo "⚠️ NEW_RELIC_LICENSE_KEY not configured - skipping New Relic setup" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
           aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
           NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
 
@@ -296,7 +302,7 @@ jobs:
 
           # Create or update the New Relic license secret
           kubectl create secret generic newrelic-license \
-            --from-literal=NEW_RELIC_LICENSE_KEY="${{ secrets.NEW_RELIC_LICENSE_KEY }}" \
+            --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
             --namespace=$NS \
             --dry-run=client -o yaml | kubectl apply -f -
 
