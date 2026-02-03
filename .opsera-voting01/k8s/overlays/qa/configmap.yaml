@@ -42,3 +42,13 @@ data:
   NEW_RELIC_NO_CONFIG_FILE: "true"
   NEW_RELIC_APPLICATION_LOGGING_ENABLED: "true"
   NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED: "true"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # ERROR SIMULATION CONFIGURATION (Canary Rollback Testing)
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Enable via UI toggle or set to "true" to start with errors enabled
+  ERROR_SIM_ENABLED: "false"
+  # Error rate when simulation is active (0.5 = 50% of requests fail)
+  ERROR_SIM_RATE: "0.5"
+  # Auto-disable after N seconds (safety net to prevent accidental prolonged errors)
+  ERROR_SIM_AUTO_DISABLE_SECONDS: "300"

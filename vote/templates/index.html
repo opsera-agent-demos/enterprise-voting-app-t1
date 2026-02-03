@@ -9,12 +9,121 @@
     <meta name="author" content="Opsera">
     <link rel='stylesheet' href="{{ url_for('static',filename='stylesheets/style.css') }}" />
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
+    <style>
+      /* Error Simulation Panel Styles */
+      #error-sim-banner {
+        display: none;
+        background: linear-gradient(90deg, #dc3545, #c82333);
+        color: white;
+        text-align: center;
+        padding: 8px 15px;
+        font-size: 14px;
+        font-weight: bold;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        animation: pulse 2s infinite;
+      }
+      #error-sim-banner.active { display: block; }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.8; }
+      }
+      #error-sim-panel {
+        background: #f8f9fa;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 20px auto;
+        max-width: 400px;
+        text-align: center;
+      }
+      #error-sim-panel h4 {
+        margin: 0 0 10px 0;
+        color: #495057;
+        font-size: 14px;
+      }
+      #error-sim-status {
+        display: inline-block;
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 12px;
+        margin-bottom: 10px;
+      }
+      #error-sim-status.inactive {
+        background: #28a745;
+        color: white;
+      }
+      #error-sim-status.active {
+        background: #dc3545;
+        color: white;
+        animation: pulse 1s infinite;
+      }
+      #error-sim-toggle {
+        background: #6c757d;
+        color: white;
+        border: none;
+        padding: 10px 25px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background 0.3s;
+      }
+      #error-sim-toggle:hover { background: #5a6268; }
+      #error-sim-toggle.enabled {
+        background: #dc3545;
+      }
+      #error-sim-toggle.enabled:hover { background: #c82333; }
+      #error-sim-info {
+        margin-top: 10px;
+        font-size: 11px;
+        color: #6c757d;
+      }
+      #error-sim-stats {
+        margin-top: 8px;
+        font-size: 11px;
+        color: #495057;
+      }
+      #error-notification {
+        display: none;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(220, 53, 69, 0.95);
+        color: white;
+        padding: 30px 50px;
+        border-radius: 10px;
+        z-index: 2000;
+        text-align: center;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      }
+      #error-notification h3 { margin: 0 0 10px 0; }
+      #error-notification p { margin: 0; opacity: 0.9; }
+    </style>
   </head>
   <body>
-    <div id="content-container">
+    <!-- Error Simulation Active Banner -->
+    <div id="error-sim-banner" {% if error_sim_enabled %}class="active"{% endif %}>
+      <i class="fa fa-warning"></i> ERROR SIMULATION ACTIVE - 50% of votes will fail
+    </div>
+
+    <!-- Error Notification Popup -->
+    <div id="error-notification">
+      <h3><i class="fa fa-times-circle"></i> Simulated Error!</h3>
+      <p>This error is intentional for canary rollback testing</p>
+    </div>
+
+    <div id="content-container" {% if error_sim_enabled %}style="margin-top: 40px;"{% endif %}>
       <div id="content-container-center">
         <div id="header">
           <span class="logo">OPSERA</span> Voting Demo
+          {% if error_sim_enabled %}
+          <span style="background: #dc3545; color: white; padding: 2px 8px; border-radius: 3px; font-size: 10px; margin-left: 10px;">ERROR SIM</span>
+          {% endif %}
         </div>
         <h3>{{option_a}} vs {{option_b}}!</h3>
         <form id="choice" name='form' method="POST" action="/">
@@ -24,8 +133,33 @@
         <div id="tip">
           Cast your vote! You can change it anytime. Powered by Opsera CI/CD.
         </div>
+
+        <!-- Error Simulation Control Panel -->
+        <div id="error-sim-panel">
+          <h4><i class="fa fa-flask"></i> Canary Rollback Testing</h4>
+          <div id="error-sim-status" class="{% if error_sim_enabled %}active{% else %}inactive{% endif %}">
+            {% if error_sim_enabled %}ERRORS ACTIVE{% else %}INACTIVE{% endif %}
+          </div>
+          <br>
+          <button id="error-sim-toggle" class="{% if error_sim_enabled %}enabled{% endif %}"
+                  onclick="toggleErrorSim()">
+            {% if error_sim_enabled %}
+            <i class="fa fa-stop"></i> Disable Errors
+            {% else %}
+            <i class="fa fa-bolt"></i> Enable Errors
+            {% endif %}
+          </button>
+          <div id="error-sim-info">
+            When enabled, 50% of votes will return HTTP 500 errors.<br>
+            New Relic will detect error rate > 2% and trigger rollback.
+          </div>
+          <div id="error-sim-stats">
+            <span id="stats-text">Errors: 0 | Requests: 0</span>
+          </div>
+        </div>
+
         <div id="version" style="margin-top: 10px; font-size: 12px; color: #666;">
-          Version: 2026.02.03-v9 | GitHub Runners | Deployed via Code-to-Cloud Enterprise
+          Version: 2026.02.03-v10 | GitHub Runners | Deployed via Code-to-Cloud Enterprise
         </div>
         <div id="hostname">
           Powered by Opsera GitOps | Pod: {{hostname}}
@@ -34,6 +168,81 @@
     </div>
     <script src="http://code.jquery.com/jquery-latest.min.js" type="text/javascript"></script>
     <script src="//cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.js"></script>
+
+    <script>
+      // Error Simulation Control
+      function toggleErrorSim() {
+        $.ajax({
+          url: '/api/error-sim',
+          method: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify({ action: 'toggle' }),
+          success: function(data) {
+            updateErrorSimUI(data);
+          },
+          error: function() {
+            alert('Failed to toggle error simulation');
+          }
+        });
+      }
+
+      function updateErrorSimUI(data) {
+        var status = $('#error-sim-status');
+        var toggle = $('#error-sim-toggle');
+        var banner = $('#error-sim-banner');
+        var container = $('#content-container');
+
+        if (data.enabled) {
+          status.removeClass('inactive').addClass('active').text('ERRORS ACTIVE');
+          toggle.addClass('enabled').html('<i class="fa fa-stop"></i> Disable Errors');
+          banner.addClass('active');
+          container.css('margin-top', '40px');
+        } else {
+          status.removeClass('active').addClass('inactive').text('INACTIVE');
+          toggle.removeClass('enabled').html('<i class="fa fa-bolt"></i> Enable Errors');
+          banner.removeClass('active');
+          container.css('margin-top', '0');
+        }
+
+        $('#stats-text').text('Errors: ' + data.error_count + ' | Requests: ' + data.request_count);
+      }
+
+      function refreshStats() {
+        $.get('/api/error-sim', function(data) {
+          updateErrorSimUI(data);
+        });
+      }
+
+      // Refresh stats every 2 seconds
+      setInterval(refreshStats, 2000);
+
+      // Handle vote form submission with error detection
+      $('#choice').on('submit', function(e) {
+        var form = $(this);
+        e.preventDefault();
+
+        $.ajax({
+          url: '/',
+          method: 'POST',
+          data: form.serialize(),
+          success: function(response) {
+            // Reload page to show vote result
+            location.reload();
+          },
+          error: function(xhr) {
+            if (xhr.status === 500) {
+              // Show error notification
+              $('#error-notification').fadeIn(200);
+              setTimeout(function() {
+                $('#error-notification').fadeOut(500);
+              }, 2000);
+              // Refresh stats
+              refreshStats();
+            }
+          }
+        });
+      });
+    </script>
 
     {% if vote %}
     <script>
