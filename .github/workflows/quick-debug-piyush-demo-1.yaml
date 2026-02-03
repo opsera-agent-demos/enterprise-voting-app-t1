@@ -1,0 +1,67 @@
+# Quick debug workflow - temporary
+name: "Quick Debug (piyush-demo-1)"
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: piyush-demo-1
+  TENANT: opsera
+  AWS_REGION: us-west-2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - name: Debug Cluster State
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          
+          NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-dev"
+          
+          echo "=== NAMESPACE ==="
+          kubectl get ns $NAMESPACE 2>/dev/null || echo "Namespace not found!"
+          
+          echo ""
+          echo "=== PODS ==="
+          kubectl get pods -n $NAMESPACE -o wide 2>/dev/null || echo "No pods found"
+          
+          echo ""
+          echo "=== POD DETAILS ==="
+          kubectl describe pods -n $NAMESPACE 2>/dev/null | head -100 || echo "No pods to describe"
+          
+          echo ""
+          echo "=== SERVICES ==="
+          kubectl get svc -n $NAMESPACE 2>/dev/null || echo "No services"
+          
+          echo ""
+          echo "=== ENDPOINTS ==="
+          kubectl get endpoints -n $NAMESPACE 2>/dev/null || echo "No endpoints"
+          
+          echo ""
+          echo "=== INGRESS ==="
+          kubectl get ingress -n $NAMESPACE -o yaml 2>/dev/null || echo "No ingress"
+          
+          echo ""
+          echo "=== POD LABELS ==="
+          kubectl get pods -n $NAMESPACE --show-labels 2>/dev/null || echo "No pods"
+          
+          echo ""
+          echo "=== SERVICE SELECTOR (vote) ==="
+          kubectl get svc vote -n $NAMESPACE -o jsonpath='{.spec.selector}' 2>/dev/null || echo "No vote service"
+          
+          echo ""
+          echo "=== RECENT EVENTS ==="
+          kubectl get events -n $NAMESPACE --sort-by='.lastTimestamp' 2>/dev/null | tail -20 || echo "No events"
