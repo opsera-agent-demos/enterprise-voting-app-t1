@@ -41,7 +41,10 @@ patches:
     patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: opsera-piyush-demo-1-qa.agent.opsera.dev
+        value: opsera-piyush-demo-1-vote-qa.agent.opsera.dev
+      - op: replace
+        path: /spec/rules/1/host
+        value: opsera-piyush-demo-1-result-qa.agent.opsera.dev
   # Set base Deployment replicas to 0 - Rollout manages pods (RULE 130)
   - target:
       kind: Deployment

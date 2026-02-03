@@ -36,4 +36,7 @@ patches:
     patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: opsera-piyush-demo-1-dev.agent.opsera.dev
+        value: opsera-piyush-demo-1-vote-dev.agent.opsera.dev
+      - op: replace
+        path: /spec/rules/1/host
+        value: opsera-piyush-demo-1-result-dev.agent.opsera.dev
