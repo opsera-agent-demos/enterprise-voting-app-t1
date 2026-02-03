@@ -330,6 +330,12 @@ jobs:
               echo "✅ All services ready!" >> $GITHUB_STEP_SUMMARY
               echo "- Vote: https://vote-voting01-dev.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
               echo "- Result: https://result-voting01-dev.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### 🚀 Next Step: Promote to QA" >> $GITHUB_STEP_SUMMARY
+              echo "To promote this build to QA, manually trigger the **Promote to QA** workflow:" >> $GITHUB_STEP_SUMMARY
+              echo "1. Go to [Actions → Promote to QA](${{ github.server_url }}/${{ github.repository }}/actions/workflows/ci-build-push-voting01-qa.yaml)" >> $GITHUB_STEP_SUMMARY
+              echo "2. Click **Run workflow**" >> $GITHUB_STEP_SUMMARY
+              echo "3. Enter image tag: \`${{ needs.build.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
               echo "success=true" >> $GITHUB_OUTPUT
               exit 0
             fi
@@ -451,6 +457,12 @@ jobs:
                       "type": "button",
                       "text": {"type": "plain_text", "text": "View Workflow", "emoji": true},
                       "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "Promote to QA", "emoji": true},
+                      "style": "primary",
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/workflows/ci-build-push-voting01-qa.yaml"
                     },
                     {
                       "type": "button",

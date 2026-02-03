@@ -1,15 +1,16 @@
 # ════════════════════════════════════════════════════════════════════════════════
 # CI BUILD & DEPLOY - voting01 STAGING (Blue-Green)
-# Preview validation → Traffic switch | Auto-promotion after analysis
+# MANUAL GATE: Requires manual trigger from GitHub Actions UI
+# Preview validation → Traffic switch | Blue-Green deployment
 # ════════════════════════════════════════════════════════════════════════════════
 
-name: "CI Build (voting01-staging)"
+name: "🚀 Promote to Staging"
 
 on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag from QA'
+        description: 'Image tag from QA (check QA kustomization.yaml)'
         required: true
         type: string
       runner:

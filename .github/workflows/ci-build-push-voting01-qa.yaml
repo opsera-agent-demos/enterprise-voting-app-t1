@@ -1,30 +1,23 @@
 # ════════════════════════════════════════════════════════════════════════════════
 # CI BUILD & DEPLOY - voting01 QA (Canary)
-# Triggered after DEV success | Progressive rollout: 20% → 50% → 100%
+# MANUAL GATE: Requires manual trigger from GitHub Actions UI
+# Progressive rollout: 20% → 50% → 100% with New Relic analysis
 # ════════════════════════════════════════════════════════════════════════════════
 
-name: "CI Build (voting01-qa)"
+name: "🚀 Promote to QA"
 
 on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag from DEV build'
+        description: 'Image tag from DEV (check DEV kustomization.yaml)'
         required: true
         type: string
-      auto_promote_staging:
-        description: 'Auto-promote to staging on success'
-        type: boolean
-        default: false
       runner:
         description: 'Runner type'
         type: choice
         options: ['self-hosted', 'github-hosted']
         default: 'self-hosted'
-  workflow_run:
-    workflows: ["CI Build (voting01-dev)"]
-    types: [completed]
-    branches: [main]
 
 env:
   APP_NAME: voting01
@@ -43,27 +36,30 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════════
 
   get-tag:
-    name: "🏷️ Get Image Tag"
+    name: "🏷️ Validate Image Tag"
     runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get Tag from Input or DEV
+      - name: Validate Image Tag
         id: tag
         run: |
-          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
-            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
-          else
-            # Get tag from DEV kustomization
-            TAG=$(grep -oP 'newTag: \K[^\s]+' .opsera-voting01/k8s/overlays/dev/kustomization.yaml | head -1)
-            echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$TAG" ]; then
+            echo "❌ Error: Image tag is required"
+            exit 1
           fi
-          echo "### 🏷️ Image Tag: \`$(cat $GITHUB_OUTPUT | grep tag | cut -d= -f2)\`" >> $GITHUB_STEP_SUMMARY
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          echo "### 🚀 Promoting to QA" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tag | \`$TAG\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered By | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Source | Manual Promotion |" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════════
   # DEPLOY TO QA (CANARY)
@@ -165,35 +161,8 @@ jobs:
           echo "success=false" >> $GITHUB_OUTPUT
 
   # ═══════════════════════════════════════════════════════════════════════════════
-  # AUTO-PROMOTE TO STAGING
-  # ═══════════════════════════════════════════════════════════════════════════════
-
-  promote-staging:
-    name: "⬆️ Promote to Staging"
-    needs: [get-tag, deploy]
-    if: |
-      needs.deploy.outputs.success == 'true' &&
-      (github.event.inputs.auto_promote_staging == 'true' || github.event_name == 'workflow_run')
-    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
-    steps:
-      - name: Trigger Staging Deployment
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GH_PAT }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'ci-build-push-voting01-staging.yaml',
-              ref: 'main',
-              inputs: {
-                image_tag: '${{ needs.get-tag.outputs.image_tag }}'
-              }
-            });
-            console.log('Triggered staging deployment');
-
-  # ═══════════════════════════════════════════════════════════════════════════════
   # NOTIFICATIONS
+  # Note: Staging promotion is MANUAL - use "Promote to Staging" workflow
   # ═══════════════════════════════════════════════════════════════════════════════
 
   notify-slack:
