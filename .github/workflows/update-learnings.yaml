@@ -124,6 +124,8 @@ jobs:
 
       - name: Commit Changes
         if: github.event_name == 'workflow_dispatch'
+        env:
+          LEARNING_SUMMARY: ${{ github.event.inputs.learning_summary }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -134,12 +136,7 @@ jobs:
             echo "No changes to commit"
             echo "### ℹ️ No Changes" >> $GITHUB_STEP_SUMMARY
           else
-            git commit -m "$(cat <<'EOF'
-docs: Update learnings guide - ${{ github.event.inputs.learning_summary }}
-
-Co-Authored-By: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
-EOF
-            )"
+            git commit -m "docs: Update learnings guide - ${LEARNING_SUMMARY}"
             git push
             echo "### ✅ Changes Committed" >> $GITHUB_STEP_SUMMARY
           fi
