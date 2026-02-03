@@ -121,6 +121,7 @@ jobs:
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | sed '$d')
           echo "**HTTP Code:** $HTTP_CODE" >> $GITHUB_STEP_SUMMARY
+          echo "HTTP Code: $HTTP_CODE"
           if [ "$HTTP_CODE" = "200" ]; then
             echo "API Connection: Success" >> $GITHUB_STEP_SUMMARY
             FIRST_PROJECT=$(echo "$BODY" | jq -r '.[0].key // "TEST"')
@@ -128,7 +129,10 @@ jobs:
             echo "JIRA_BASE_URL=${JIRA_BASE_URL}" >> $GITHUB_ENV
             echo "FIRST_PROJECT=${FIRST_PROJECT}" >> $GITHUB_ENV
           else
-            echo "API Connection: Failed" >> $GITHUB_STEP_SUMMARY
+            echo "API Connection: Failed (HTTP $HTTP_CODE)" >> $GITHUB_STEP_SUMMARY
+            echo "Response body: $BODY" >> $GITHUB_STEP_SUMMARY
+            echo "::error::Jira API returned HTTP $HTTP_CODE"
+            echo "Response: $BODY"
             exit 1
           fi
 
