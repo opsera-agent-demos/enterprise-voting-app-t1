@@ -387,73 +387,57 @@ jobs:
         with:
           payload: |
             {
-              "attachments": [
+              "text": "${{ steps.status.outputs.emoji }} ${{ steps.status.outputs.title }} - voting01",
+              "blocks": [
                 {
-                  "color": "${{ steps.status.outputs.color }}",
-                  "blocks": [
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ steps.status.outputs.emoji }} ${{ steps.status.outputs.title }}",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Application:*\n`voting01`"},
+                    {"type": "mrkdwn", "text": "*Environment:*\n`dev`"},
+                    {"type": "mrkdwn", "text": "*Image Tag:*\n`${{ needs.build.outputs.image_tag }}`"},
+                    {"type": "mrkdwn", "text": "*Triggered By:*\n${{ github.actor }}"}
+                  ]
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Security:* ${{ steps.status.outputs.security_icon }}"},
+                    {"type": "mrkdwn", "text": "*Quality:* ${{ steps.status.outputs.quality_icon }}"},
+                    {"type": "mrkdwn", "text": "*Build:* ${{ needs.build.result == 'success' && '✅' || '❌' }}"},
+                    {"type": "mrkdwn", "text": "*Deploy:* ${{ needs.deploy.outputs.success == 'true' && '✅' || '❌' }}"}
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {"type": "mrkdwn", "text": "Commit: `${{ github.sha }}` | Branch: `${{ github.ref_name }}`"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
                     {
-                      "type": "header",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "${{ steps.status.outputs.emoji }} ${{ steps.status.outputs.title }}",
-                        "emoji": true
-                      }
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View Workflow", "emoji": true},
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
                     },
                     {
-                      "type": "section",
-                      "fields": [
-                        {"type": "mrkdwn", "text": "*Application:*\n`voting01`"},
-                        {"type": "mrkdwn", "text": "*Environment:*\n`dev`"},
-                        {"type": "mrkdwn", "text": "*Image Tag:*\n`${{ needs.build.outputs.image_tag }}`"},
-                        {"type": "mrkdwn", "text": "*Triggered By:*\n${{ github.actor }}"}
-                      ]
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "Vote App", "emoji": true},
+                      "url": "https://vote-voting01-dev.agent.opsera.dev"
                     },
                     {
-                      "type": "section",
-                      "fields": [
-                        {"type": "mrkdwn", "text": "*Security Scan:*\n${{ steps.status.outputs.security_icon }} ${{ needs.security-gitleaks.result }}"},
-                        {"type": "mrkdwn", "text": "*Quality Gate:*\n${{ steps.status.outputs.quality_icon }} ${{ needs.quality-sonarqube.outputs.quality_gate_status || 'N/A' }}"},
-                        {"type": "mrkdwn", "text": "*Build:*\n${{ needs.build.result == 'success' && '✅' || '❌' }} ${{ needs.build.result }}"},
-                        {"type": "mrkdwn", "text": "*Deploy:*\n${{ needs.deploy.outputs.success == 'true' && '✅' || '❌' }} ${{ needs.deploy.outputs.success == 'true' && 'success' || 'failed' }}"}
-                      ]
-                    },
-                    {
-                      "type": "context",
-                      "elements": [
-                        {"type": "mrkdwn", "text": "*Commit:* `${{ github.sha }}`"},
-                        {"type": "mrkdwn", "text": "*Branch:* `${{ github.ref_name }}`"}
-                      ]
-                    },
-                    {
-                      "type": "divider"
-                    },
-                    {
-                      "type": "section",
-                      "text": {
-                        "type": "mrkdwn",
-                        "text": "*Application URLs:*\n• <https://vote-voting01-dev.agent.opsera.dev|Vote App>\n• <https://result-voting01-dev.agent.opsera.dev|Result App>"
-                      }
-                    },
-                    {
-                      "type": "actions",
-                      "elements": [
-                        {
-                          "type": "button",
-                          "text": {"type": "plain_text", "text": "View Workflow", "emoji": true},
-                          "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-                          "style": "primary"
-                        },
-                        {
-                          "type": "button",
-                          "text": {"type": "plain_text", "text": "View Commit", "emoji": true},
-                          "url": "${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
-                        },
-                        {
-                          "type": "button",
-                          "text": {"type": "plain_text", "text": "SonarQube", "emoji": true},
-                          "url": "${{ needs.quality-sonarqube.outputs.sonar_url || secrets.SONAR_HOST_URL }}"
-                        }
-                      ]
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "Result App", "emoji": true},
+                      "url": "https://result-voting01-dev.agent.opsera.dev"
                     }
                   ]
                 }
