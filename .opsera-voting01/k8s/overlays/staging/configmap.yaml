@@ -35,8 +35,7 @@ data:
   NEW_RELIC_LOG_LEVEL: "info"
   NEW_RELIC_LABELS: "environment:staging;app:voting01;team:platform"
 
-  # Python (Vote) Settings
-  NEW_RELIC_APP_NAME: "voting01-vote-staging"
+  # Environment (applies to all services)
   NEW_RELIC_ENVIRONMENT: "staging"
 
   # Node.js (Result) Settings

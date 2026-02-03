@@ -35,8 +35,7 @@ data:
   NEW_RELIC_LOG_LEVEL: "info"
   NEW_RELIC_LABELS: "environment:dev;app:voting01;team:platform"
 
-  # Python (Vote) Settings
-  NEW_RELIC_APP_NAME: "voting01-vote-dev"
+  # Environment (applies to all services)
   NEW_RELIC_ENVIRONMENT: "dev"
 
   # Node.js (Result) Settings

@@ -78,7 +78,7 @@ jobs:
     name: "📊 SonarQube"
     runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
     if: github.event.inputs.quality_gate_mode != 'skip'
-    continue-on-error: ${{ github.event.inputs.quality_gate_mode == 'non-blocking' }}
+    continue-on-error: ${{ github.event.inputs.quality_gate_mode != 'blocking' }}
     outputs:
       quality_gate_status: ${{ steps.quality-gate.outputs.status }}
       sonar_url: ${{ steps.quality-gate.outputs.dashboard_url }}
@@ -160,6 +160,15 @@ jobs:
     if: always() && !contains(needs.*.result, 'failure')
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
+      has_security_findings: ${{ steps.security-summary.outputs.has_security_findings }}
+      total_critical: ${{ steps.security-summary.outputs.total_critical }}
+      total_high: ${{ steps.security-summary.outputs.total_high }}
+      vote_critical: ${{ steps.parse-vote.outputs.critical }}
+      vote_high: ${{ steps.parse-vote.outputs.high }}
+      result_critical: ${{ steps.parse-result.outputs.critical }}
+      result_high: ${{ steps.parse-result.outputs.high }}
+      worker_critical: ${{ steps.parse-worker.outputs.critical }}
+      worker_high: ${{ steps.parse-worker.outputs.high }}
     steps:
       - uses: actions/checkout@v4
 
@@ -190,13 +199,39 @@ jobs:
           echo "image=${ECR}:${{ steps.tag.outputs.tag }}" >> $GITHUB_OUTPUT
 
       - name: Grype Scan Vote
+        id: grype-vote
         if: github.event.inputs.security_scan_mode != 'skip'
         uses: anchore/scan-action@v3
         continue-on-error: true
         with:
           image: ${{ steps.build-vote.outputs.image }}
-          fail-build: false
+          fail-build: ${{ github.event.inputs.security_scan_mode == 'fail' }}
           severity-cutoff: high
+          output-format: json
+          output-file: grype-vote-results.json
+
+      - name: Parse Vote Vulnerabilities
+        id: parse-vote
+        if: github.event.inputs.security_scan_mode != 'skip'
+        run: |
+          if [ -f grype-vote-results.json ]; then
+            CRITICAL=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-vote-results.json 2>/dev/null || echo "0")
+            HIGH=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' grype-vote-results.json 2>/dev/null || echo "0")
+            echo "critical=${CRITICAL}" >> $GITHUB_OUTPUT
+            echo "high=${HIGH}" >> $GITHUB_OUTPUT
+            echo "### 🔒 Vote Security Scan Results" >> $GITHUB_STEP_SUMMARY
+            echo "- Critical: ${CRITICAL}" >> $GITHUB_STEP_SUMMARY
+            echo "- High: ${HIGH}" >> $GITHUB_STEP_SUMMARY
+            if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "has_vulns=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_vulns=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "critical=0" >> $GITHUB_OUTPUT
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "has_vulns=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Push Vote
         run: |
@@ -212,13 +247,39 @@ jobs:
           echo "image=${ECR}:${{ steps.tag.outputs.tag }}" >> $GITHUB_OUTPUT
 
       - name: Grype Scan Result
+        id: grype-result
         if: github.event.inputs.security_scan_mode != 'skip'
         uses: anchore/scan-action@v3
         continue-on-error: true
         with:
           image: ${{ steps.build-result.outputs.image }}
-          fail-build: false
+          fail-build: ${{ github.event.inputs.security_scan_mode == 'fail' }}
           severity-cutoff: high
+          output-format: json
+          output-file: grype-result-results.json
+
+      - name: Parse Result Vulnerabilities
+        id: parse-result
+        if: github.event.inputs.security_scan_mode != 'skip'
+        run: |
+          if [ -f grype-result-results.json ]; then
+            CRITICAL=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-result-results.json 2>/dev/null || echo "0")
+            HIGH=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' grype-result-results.json 2>/dev/null || echo "0")
+            echo "critical=${CRITICAL}" >> $GITHUB_OUTPUT
+            echo "high=${HIGH}" >> $GITHUB_OUTPUT
+            echo "### 🔒 Result Security Scan Results" >> $GITHUB_STEP_SUMMARY
+            echo "- Critical: ${CRITICAL}" >> $GITHUB_STEP_SUMMARY
+            echo "- High: ${HIGH}" >> $GITHUB_STEP_SUMMARY
+            if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "has_vulns=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_vulns=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "critical=0" >> $GITHUB_OUTPUT
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "has_vulns=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Push Result
         run: |
@@ -234,13 +295,66 @@ jobs:
           echo "image=${ECR}:${{ steps.tag.outputs.tag }}" >> $GITHUB_OUTPUT
 
       - name: Grype Scan Worker
+        id: grype-worker
         if: github.event.inputs.security_scan_mode != 'skip'
         uses: anchore/scan-action@v3
         continue-on-error: true
         with:
           image: ${{ steps.build-worker.outputs.image }}
-          fail-build: false
+          fail-build: ${{ github.event.inputs.security_scan_mode == 'fail' }}
           severity-cutoff: high
+          output-format: json
+          output-file: grype-worker-results.json
+
+      - name: Parse Worker Vulnerabilities
+        id: parse-worker
+        if: github.event.inputs.security_scan_mode != 'skip'
+        run: |
+          if [ -f grype-worker-results.json ]; then
+            CRITICAL=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' grype-worker-results.json 2>/dev/null || echo "0")
+            HIGH=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' grype-worker-results.json 2>/dev/null || echo "0")
+            echo "critical=${CRITICAL}" >> $GITHUB_OUTPUT
+            echo "high=${HIGH}" >> $GITHUB_OUTPUT
+            echo "### 🔒 Worker Security Scan Results" >> $GITHUB_STEP_SUMMARY
+            echo "- Critical: ${CRITICAL}" >> $GITHUB_STEP_SUMMARY
+            echo "- High: ${HIGH}" >> $GITHUB_STEP_SUMMARY
+            if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "has_vulns=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_vulns=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "critical=0" >> $GITHUB_OUTPUT
+            echo "high=0" >> $GITHUB_OUTPUT
+            echo "has_vulns=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Aggregate Security Findings
+        id: security-summary
+        if: github.event.inputs.security_scan_mode != 'skip'
+        run: |
+          VOTE_CRIT="${{ steps.parse-vote.outputs.critical }}"
+          VOTE_HIGH="${{ steps.parse-vote.outputs.high }}"
+          RESULT_CRIT="${{ steps.parse-result.outputs.critical }}"
+          RESULT_HIGH="${{ steps.parse-result.outputs.high }}"
+          WORKER_CRIT="${{ steps.parse-worker.outputs.critical }}"
+          WORKER_HIGH="${{ steps.parse-worker.outputs.high }}"
+
+          TOTAL_CRIT=$((${VOTE_CRIT:-0} + ${RESULT_CRIT:-0} + ${WORKER_CRIT:-0}))
+          TOTAL_HIGH=$((${VOTE_HIGH:-0} + ${RESULT_HIGH:-0} + ${WORKER_HIGH:-0}))
+
+          echo "total_critical=${TOTAL_CRIT}" >> $GITHUB_OUTPUT
+          echo "total_high=${TOTAL_HIGH}" >> $GITHUB_OUTPUT
+
+          if [ "$TOTAL_CRIT" -gt 0 ] || [ "$TOTAL_HIGH" -gt 0 ]; then
+            echo "has_security_findings=true" >> $GITHUB_OUTPUT
+            echo "### ⚠️ Security Findings Summary" >> $GITHUB_STEP_SUMMARY
+            echo "**Total Critical:** ${TOTAL_CRIT}" >> $GITHUB_STEP_SUMMARY
+            echo "**Total High:** ${TOTAL_HIGH}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "has_security_findings=false" >> $GITHUB_OUTPUT
+            echo "### ✅ No Critical/High Vulnerabilities Found" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Push Worker
         run: |
@@ -480,6 +594,189 @@ jobs:
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # JIRA SECURITY ISSUE - Create ticket when vulnerabilities found
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  notify-jira-security:
+    name: "🔒 Jira Security Issue"
+    needs: [build]
+    if: always() && needs.build.outputs.has_security_findings == 'true'
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    continue-on-error: true
+    steps:
+      - name: Check Jira Configuration
+        id: check-jira
+        run: |
+          CONFIGURED="true"
+          MISSING=""
+
+          if [ -z "${{ secrets.JIRA_API_TOKEN }}" ]; then
+            CONFIGURED="false"
+            MISSING="${MISSING} JIRA_API_TOKEN"
+          fi
+          if [ -z "${{ secrets.JIRA_EMAIL }}" ]; then
+            CONFIGURED="false"
+            MISSING="${MISSING} JIRA_EMAIL"
+          fi
+          if [ -z "${{ secrets.JIRA_BASE_URL }}" ]; then
+            CONFIGURED="false"
+            MISSING="${MISSING} JIRA_BASE_URL"
+          fi
+
+          echo "configured=${CONFIGURED}" >> $GITHUB_OUTPUT
+
+          if [ "$CONFIGURED" = "false" ]; then
+            echo "⚠️ Jira not configured - missing:${MISSING}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Create Jira Security Issue
+        if: steps.check-jira.outputs.configured == 'true'
+        run: |
+          TOTAL_CRIT="${{ needs.build.outputs.total_critical }}"
+          TOTAL_HIGH="${{ needs.build.outputs.total_high }}"
+
+          # Determine priority based on findings
+          if [ "${TOTAL_CRIT:-0}" -gt 0 ]; then
+            PRIORITY="Highest"
+            SEVERITY_TEXT="CRITICAL"
+          else
+            PRIORITY="High"
+            SEVERITY_TEXT="HIGH"
+          fi
+
+          # Create security vulnerability issue
+          RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Basic $(echo -n '${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}' | base64)" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/3/issue" \
+            -d '{
+              "fields": {
+                "project": {"key": "DEPLOY"},
+                "summary": "[SECURITY] voting01-dev: '${TOTAL_CRIT}' Critical, '${TOTAL_HIGH}' High vulnerabilities",
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "Security scan detected vulnerabilities in container images for voting01-dev.", "marks": [{"type": "strong"}]}
+                      ]
+                    },
+                    {
+                      "type": "heading",
+                      "attrs": {"level": 3},
+                      "content": [{"type": "text", "text": "Vulnerability Summary"}]
+                    },
+                    {
+                      "type": "table",
+                      "attrs": {"isNumberColumnEnabled": false, "layout": "default"},
+                      "content": [
+                        {
+                          "type": "tableRow",
+                          "content": [
+                            {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Service"}]}]},
+                            {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Critical"}]}]},
+                            {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "High"}]}]}
+                          ]
+                        },
+                        {
+                          "type": "tableRow",
+                          "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Vote"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "${{ needs.build.outputs.vote_critical }}"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "${{ needs.build.outputs.vote_high }}"}]}]}
+                          ]
+                        },
+                        {
+                          "type": "tableRow",
+                          "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Result"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "${{ needs.build.outputs.result_critical }}"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "${{ needs.build.outputs.result_high }}"}]}]}
+                          ]
+                        },
+                        {
+                          "type": "tableRow",
+                          "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Worker"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "${{ needs.build.outputs.worker_critical }}"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "${{ needs.build.outputs.worker_high }}"}]}]}
+                          ]
+                        },
+                        {
+                          "type": "tableRow",
+                          "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "TOTAL", "marks": [{"type": "strong"}]}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "'${TOTAL_CRIT}'", "marks": [{"type": "strong"}]}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "'${TOTAL_HIGH}'", "marks": [{"type": "strong"}]}]}]}
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "heading",
+                      "attrs": {"level": 3},
+                      "content": [{"type": "text", "text": "Build Details"}]
+                    },
+                    {
+                      "type": "bulletList",
+                      "content": [
+                        {
+                          "type": "listItem",
+                          "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Image Tag: ${{ needs.build.outputs.image_tag }}"}]}]
+                        },
+                        {
+                          "type": "listItem",
+                          "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Commit: ${{ github.sha }}"}]}]
+                        },
+                        {
+                          "type": "listItem",
+                          "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Branch: ${{ github.ref_name }}"}]}]
+                        },
+                        {
+                          "type": "listItem",
+                          "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Triggered by: ${{ github.actor }}"}]}]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "View full scan results: "},
+                        {"type": "text", "text": "GitHub Actions", "marks": [{"type": "link", "attrs": {"href": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}}]}
+                      ]
+                    }
+                  ]
+                },
+                "issuetype": {"name": "Bug"},
+                "priority": {"name": "'${PRIORITY}'"},
+                "labels": ["security-vulnerability", "container-scan", "voting01", "dev", "grype"]
+              }
+            }')
+
+          ISSUE_KEY=$(echo "$RESPONSE" | jq -r '.key // "FAILED"')
+
+          if [ "$ISSUE_KEY" != "FAILED" ] && [ "$ISSUE_KEY" != "null" ]; then
+            echo "### 🔒 Jira Security Issue Created" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Issue:** [$ISSUE_KEY](${{ secrets.JIRA_BASE_URL }}/browse/${ISSUE_KEY})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Service | Critical | High |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|----------|------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Vote | ${{ needs.build.outputs.vote_critical }} | ${{ needs.build.outputs.vote_high }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Result | ${{ needs.build.outputs.result_critical }} | ${{ needs.build.outputs.result_high }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Worker | ${{ needs.build.outputs.worker_critical }} | ${{ needs.build.outputs.worker_high }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Total** | **${TOTAL_CRIT}** | **${TOTAL_HIGH}** |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Failed to create Jira security issue" >> $GITHUB_STEP_SUMMARY
+            echo "Response: $RESPONSE" >> $GITHUB_STEP_SUMMARY
+          fi
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
 
   notify-jira:
     name: "📋 Jira Issue"
