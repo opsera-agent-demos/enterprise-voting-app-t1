@@ -1,0 +1,227 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# PROMOTION WORKFLOW - voting01
+# Manual/auto promotion between environments: DEV → QA → Staging
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "Promote (voting01)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_environment:
+        description: 'Source environment'
+        required: true
+        type: choice
+        options: ['dev', 'qa']
+      target_environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: ['qa', 'staging']
+      image_tag:
+        description: 'Image tag (leave empty to use current source tag)'
+        required: false
+        type: string
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['self-hosted', 'github-hosted']
+        default: 'self-hosted'
+
+env:
+  APP_NAME: voting01
+  AWS_REGION: us-west-2
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # VALIDATE PROMOTION
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  validate:
+    name: "🔍 Validate Promotion"
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+      valid: ${{ steps.validate.outputs.valid }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Promotion Path
+        id: validate
+        run: |
+          SOURCE="${{ github.event.inputs.source_environment }}"
+          TARGET="${{ github.event.inputs.target_environment }}"
+
+          # Valid paths: dev → qa, qa → staging
+          if [ "$SOURCE" = "dev" ] && [ "$TARGET" = "qa" ]; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "✅ Valid promotion: DEV → QA" >> $GITHUB_STEP_SUMMARY
+          elif [ "$SOURCE" = "qa" ] && [ "$TARGET" = "staging" ]; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "✅ Valid promotion: QA → Staging" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "❌ Invalid promotion path: ${SOURCE} → ${TARGET}" >> $GITHUB_STEP_SUMMARY
+            echo "Valid paths: dev → qa, qa → staging" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Get Image Tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            TAG="${{ github.event.inputs.image_tag }}"
+          else
+            # Get tag from source environment
+            TAG=$(grep -oP 'newTag: \K[^\s]+' .opsera-voting01/k8s/overlays/${{ github.event.inputs.source_environment }}/kustomization.yaml | head -1)
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "### 🏷️ Promoting Tag: \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- From: ${{ github.event.inputs.source_environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- To: ${{ github.event.inputs.target_environment }}" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # CHECK SOURCE HEALTH
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  health-check:
+    name: "💚 Health Check"
+    needs: [validate]
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    outputs:
+      healthy: ${{ steps.check.outputs.healthy }}
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check Source Health
+        id: check
+        run: |
+          aws eks update-kubeconfig --name opsera-usw2-np --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ github.event.inputs.source_environment }}"
+
+          # Check if source has Rollouts or Deployments
+          if kubectl get rollout vote -n $NS &>/dev/null; then
+            VOTE_STATUS=$(kubectl get rollout vote -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+            RESULT_STATUS=$(kubectl get rollout result -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+            WORKER_STATUS=$(kubectl get rollout worker -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+          else
+            VOTE_READY=$(kubectl get deploy vote -n $NS -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            RESULT_READY=$(kubectl get deploy result -n $NS -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            WORKER_READY=$(kubectl get deploy worker -n $NS -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+
+            [ "${VOTE_READY:-0}" -ge 1 ] && VOTE_STATUS="Healthy" || VOTE_STATUS="Unhealthy"
+            [ "${RESULT_READY:-0}" -ge 1 ] && RESULT_STATUS="Healthy" || RESULT_STATUS="Unhealthy"
+            [ "${WORKER_READY:-0}" -ge 1 ] && WORKER_STATUS="Healthy" || WORKER_STATUS="Unhealthy"
+          fi
+
+          echo "Vote: ${VOTE_STATUS}, Result: ${RESULT_STATUS}, Worker: ${WORKER_STATUS}"
+
+          if [ "$VOTE_STATUS" = "Healthy" ] && [ "$RESULT_STATUS" = "Healthy" ] && [ "$WORKER_STATUS" = "Healthy" ]; then
+            echo "healthy=true" >> $GITHUB_OUTPUT
+            echo "✅ Source environment healthy" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "healthy=false" >> $GITHUB_OUTPUT
+            echo "❌ Source environment unhealthy" >> $GITHUB_STEP_SUMMARY
+            echo "- Vote: ${VOTE_STATUS}" >> $GITHUB_STEP_SUMMARY
+            echo "- Result: ${RESULT_STATUS}" >> $GITHUB_STEP_SUMMARY
+            echo "- Worker: ${WORKER_STATUS}" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # TRIGGER DEPLOYMENT
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  promote:
+    name: "⬆️ Promote"
+    needs: [validate, health-check]
+    if: needs.health-check.outputs.healthy == 'true'
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    steps:
+      - name: Trigger Target Deployment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PAT }}
+          script: |
+            const target = '${{ github.event.inputs.target_environment }}';
+            const workflowFile = target === 'qa'
+              ? 'ci-build-push-voting01-qa.yaml'
+              : 'ci-build-push-voting01-staging.yaml';
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: workflowFile,
+              ref: 'main',
+              inputs: {
+                image_tag: '${{ needs.validate.outputs.image_tag }}'
+              }
+            });
+
+            console.log(`Triggered ${target} deployment with tag: ${{ needs.validate.outputs.image_tag }}`);
+
+      - name: Summary
+        run: |
+          echo "### ✅ Promotion Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Source | ${{ github.event.inputs.source_environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | ${{ github.event.inputs.target_environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | ${{ needs.validate.outputs.image_tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # NOTIFICATIONS
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  notify-slack:
+    name: "📢 Slack"
+    needs: [validate, promote]
+    if: always()
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    steps:
+      - name: Send Slack Notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "⬆️ Promotion Triggered: voting01"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*From:*\n${{ github.event.inputs.source_environment }}"},
+                    {"type": "mrkdwn", "text": "*To:*\n${{ github.event.inputs.target_environment }}"},
+                    {"type": "mrkdwn", "text": "*Tag:*\n${{ needs.validate.outputs.image_tag }}"},
+                    {"type": "mrkdwn", "text": "*Triggered by:*\n${{ github.actor }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [{
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "View Workflow"},
+                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

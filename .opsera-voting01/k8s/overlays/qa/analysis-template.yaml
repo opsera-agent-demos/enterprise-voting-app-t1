@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: voting01-health-check
+  labels:
+    app.kubernetes.io/name: voting01
+    environment: qa
+spec:
+  args:
+    - name: service-name
+    - name: namespace
+  metrics:
+    - name: http-success-rate
+      interval: 30s
+      count: 10
+      successCondition: result == "healthy"
+      failureLimit: 2
+      provider:
+        job:
+          spec:
+            backoffLimit: 1
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: health-check
+                    image: curlimages/curl:latest
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://{{args.service-name}}.{{args.namespace}}.svc.cluster.local/")
+                        if [ "$HTTP_CODE" = "200" ]; then
+                          echo "healthy"
+                          exit 0
+                        else
+                          echo "unhealthy: HTTP $HTTP_CODE"
+                          exit 1
+                        fi

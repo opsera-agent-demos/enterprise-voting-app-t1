@@ -1,0 +1,193 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# CI BUILD & DEPLOY - voting01 STAGING (Blue-Green)
+# Preview validation → Traffic switch | Auto-promotion after analysis
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "CI Build (voting01-staging)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag from QA'
+        required: true
+        type: string
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['self-hosted', 'github-hosted']
+        default: 'self-hosted'
+
+env:
+  APP_NAME: voting01
+  ENVIRONMENT: staging
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+permissions:
+  contents: write
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DEPLOY TO STAGING (BLUE-GREEN)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  deploy:
+    name: "🚀 Deploy Staging (Blue-Green)"
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    outputs:
+      success: ${{ steps.verify.outputs.success }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Update Kustomization
+        run: |
+          cd .opsera-voting01/k8s/overlays/${{ env.ENVIRONMENT }}
+          sed -i "s|newTag:.*|newTag: ${{ github.event.inputs.image_tag }}|g" kustomization.yaml
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .opsera-voting01/
+          git diff --cached --quiet || git commit -m "deploy(voting01-staging): ${{ github.event.inputs.image_tag }} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Trigger ArgoCD Sync
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl annotate application ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -n argocd argocd.argoproj.io/refresh=hard --overwrite
+
+      - name: Verify Blue-Green Rollout
+        id: verify
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+
+          echo "### 📊 Blue-Green Rollout Progress" >> $GITHUB_STEP_SUMMARY
+
+          for i in {1..60}; do
+            VOTE_STATUS=$(kubectl get rollout vote -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
+            RESULT_STATUS=$(kubectl get rollout result -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
+            WORKER_STATUS=$(kubectl get rollout worker -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
+
+            # Check preview replicas
+            VOTE_PREVIEW=$(kubectl get rollout vote -n $NS -o jsonpath='{.status.blueGreen.previewReplicas}' 2>/dev/null || echo "0")
+            RESULT_PREVIEW=$(kubectl get rollout result -n $NS -o jsonpath='{.status.blueGreen.previewReplicas}' 2>/dev/null || echo "0")
+
+            echo "Vote: ${VOTE_STATUS} (preview: ${VOTE_PREVIEW}), Result: ${RESULT_STATUS} (preview: ${RESULT_PREVIEW}), Worker: ${WORKER_STATUS}"
+
+            if [ "$VOTE_STATUS" = "Healthy" ] && [ "$RESULT_STATUS" = "Healthy" ] && [ "$WORKER_STATUS" = "Healthy" ]; then
+              echo "✅ All rollouts healthy!" >> $GITHUB_STEP_SUMMARY
+              echo "- Active Vote: https://vote-voting01-staging.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "- Active Result: https://result-voting01-staging.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "- Preview Vote: https://vote-voting01-staging-preview.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "- Preview Result: https://result-voting01-staging-preview.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "success=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            if [ "$VOTE_STATUS" = "Degraded" ] || [ "$RESULT_STATUS" = "Degraded" ] || [ "$WORKER_STATUS" = "Degraded" ]; then
+              echo "❌ Rollout degraded!" >> $GITHUB_STEP_SUMMARY
+              echo "success=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+
+            sleep 15
+          done
+          echo "⏱️ Rollout timeout" >> $GITHUB_STEP_SUMMARY
+          echo "success=false" >> $GITHUB_OUTPUT
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # NOTIFICATIONS
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  notify-slack:
+    name: "📢 Slack"
+    needs: [deploy]
+    if: always()
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    steps:
+      - name: Send Slack Notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ needs.deploy.outputs.success == 'true' && '✅ Staging Blue-Green Succeeded' || '❌ Staging Blue-Green Failed' }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*App:*\nvoting01"},
+                    {"type": "mrkdwn", "text": "*Environment:*\nStaging (Blue-Green)"},
+                    {"type": "mrkdwn", "text": "*Tag:*\n${{ github.event.inputs.image_tag }}"},
+                    {"type": "mrkdwn", "text": "*Triggered by:*\n${{ github.actor }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [{
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "View Workflow"},
+                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  notify-jira:
+    name: "📋 Jira"
+    needs: [deploy]
+    if: always() && needs.deploy.outputs.success == 'false'
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    continue-on-error: true
+    steps:
+      - name: Create Jira Issue
+        if: env.JIRA_API_TOKEN != '' && env.JIRA_BASE_URL != ''
+        run: |
+          curl -X POST \
+            -H "Authorization: Basic $(echo -n '${{ secrets.JIRA_EMAIL }}:${{ secrets.JIRA_API_TOKEN }}' | base64)" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.JIRA_BASE_URL }}/rest/api/3/issue" \
+            -d '{
+              "fields": {
+                "project": {"key": "DEPLOY"},
+                "summary": "Deployment Failed: voting01-staging",
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "Blue-Green deployment failed for voting01-staging. Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
+                      ]
+                    }
+                  ]
+                },
+                "issuetype": {"name": "Bug"}
+              }
+            }' || echo "Jira notification skipped"
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}

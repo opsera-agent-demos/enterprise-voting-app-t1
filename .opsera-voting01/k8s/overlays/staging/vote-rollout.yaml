@@ -1,0 +1,62 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: vote
+  labels:
+    app: vote
+    app.kubernetes.io/name: vote
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: vote
+  template:
+    metadata:
+      labels:
+        app: vote
+        app.kubernetes.io/name: vote
+    spec:
+      serviceAccountName: vote-sa
+      containers:
+        - name: vote
+          image: PLACEHOLDER_VOTE_IMAGE
+          ports:
+            - containerPort: 80
+              name: http
+          envFrom:
+            - configMapRef:
+                name: voting01-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20
+  strategy:
+    blueGreen:
+      activeService: vote
+      previewService: vote-preview
+      autoPromotionEnabled: true
+      scaleDownDelaySeconds: 60
+      prePromotionAnalysis:
+        templates:
+          - templateName: voting01-bluegreen-analysis
+        args:
+          - name: service-name
+            value: vote-preview
+          - name: namespace
+            value: voting01-staging

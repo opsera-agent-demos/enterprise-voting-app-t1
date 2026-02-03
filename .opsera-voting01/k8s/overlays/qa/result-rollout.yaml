@@ -1,0 +1,77 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: result
+  labels:
+    app: result
+    app.kubernetes.io/name: result
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: result
+  template:
+    metadata:
+      labels:
+        app: result
+        app.kubernetes.io/name: result
+    spec:
+      serviceAccountName: result-sa
+      containers:
+        - name: result
+          image: PLACEHOLDER_RESULT_IMAGE
+          ports:
+            - containerPort: 80
+              name: http
+          envFrom:
+            - configMapRef:
+                name: voting01-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20
+  strategy:
+    canary:
+      canaryService: result-canary
+      stableService: result
+      trafficRouting:
+        nginx:
+          stableIngress: voting01-ingress
+      steps:
+        - setWeight: 20
+        - pause: {duration: 2m}
+        - analysis:
+            templates:
+              - templateName: voting01-health-check
+            args:
+              - name: service-name
+                value: result-canary
+              - name: namespace
+                value: voting01-qa
+        - setWeight: 50
+        - pause: {duration: 3m}
+        - analysis:
+            templates:
+              - templateName: voting01-health-check
+            args:
+              - name: service-name
+                value: result-canary
+              - name: namespace
+                value: voting01-qa
+        - setWeight: 100

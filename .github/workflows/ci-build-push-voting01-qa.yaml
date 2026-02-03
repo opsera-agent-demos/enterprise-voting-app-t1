@@ -1,0 +1,216 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# CI BUILD & DEPLOY - voting01 QA (Canary)
+# Triggered after DEV success | Progressive rollout: 20% → 50% → 100%
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "CI Build (voting01-qa)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag from DEV build'
+        required: true
+        type: string
+      auto_promote_staging:
+        description: 'Auto-promote to staging on success'
+        type: boolean
+        default: false
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['self-hosted', 'github-hosted']
+        default: 'self-hosted'
+  workflow_run:
+    workflows: ["CI Build (voting01-dev)"]
+    types: [completed]
+    branches: [main]
+
+env:
+  APP_NAME: voting01
+  ENVIRONMENT: qa
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # GET IMAGE TAG
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  get-tag:
+    name: "🏷️ Get Image Tag"
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Tag from Input or DEV
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          else
+            # Get tag from DEV kustomization
+            TAG=$(grep -oP 'newTag: \K[^\s]+' .opsera-voting01/k8s/overlays/dev/kustomization.yaml | head -1)
+            echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          fi
+          echo "### 🏷️ Image Tag: \`$(cat $GITHUB_OUTPUT | grep tag | cut -d= -f2)\`" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DEPLOY TO QA (CANARY)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  deploy:
+    name: "🚀 Deploy QA (Canary)"
+    needs: [get-tag]
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    outputs:
+      success: ${{ steps.verify.outputs.success }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Update Kustomization
+        run: |
+          cd .opsera-voting01/k8s/overlays/${{ env.ENVIRONMENT }}
+          sed -i "s|newTag:.*|newTag: ${{ needs.get-tag.outputs.image_tag }}|g" kustomization.yaml
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .opsera-voting01/
+          git diff --cached --quiet || git commit -m "deploy(voting01-qa): ${{ needs.get-tag.outputs.image_tag }} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Trigger ArgoCD Sync
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl annotate application ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -n argocd argocd.argoproj.io/refresh=hard --overwrite
+
+      - name: Verify Canary Rollout
+        id: verify
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+
+          echo "### 📊 Canary Rollout Progress" >> $GITHUB_STEP_SUMMARY
+
+          for i in {1..60}; do
+            # Check rollout status using kubectl argo rollouts
+            VOTE_STATUS=$(kubectl get rollout vote -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
+            RESULT_STATUS=$(kubectl get rollout result -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
+            WORKER_STATUS=$(kubectl get rollout worker -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
+
+            echo "Vote: ${VOTE_STATUS}, Result: ${RESULT_STATUS}, Worker: ${WORKER_STATUS}"
+
+            if [ "$VOTE_STATUS" = "Healthy" ] && [ "$RESULT_STATUS" = "Healthy" ] && [ "$WORKER_STATUS" = "Healthy" ]; then
+              echo "✅ All rollouts healthy!" >> $GITHUB_STEP_SUMMARY
+              echo "- Vote: https://vote-voting01-qa.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "- Result: https://result-voting01-qa.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "success=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            if [ "$VOTE_STATUS" = "Degraded" ] || [ "$RESULT_STATUS" = "Degraded" ] || [ "$WORKER_STATUS" = "Degraded" ]; then
+              echo "❌ Rollout degraded!" >> $GITHUB_STEP_SUMMARY
+              echo "success=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+
+            sleep 15
+          done
+          echo "⏱️ Rollout timeout" >> $GITHUB_STEP_SUMMARY
+          echo "success=false" >> $GITHUB_OUTPUT
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # AUTO-PROMOTE TO STAGING
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  promote-staging:
+    name: "⬆️ Promote to Staging"
+    needs: [get-tag, deploy]
+    if: |
+      needs.deploy.outputs.success == 'true' &&
+      (github.event.inputs.auto_promote_staging == 'true' || github.event_name == 'workflow_run')
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    steps:
+      - name: Trigger Staging Deployment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PAT }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci-build-push-voting01-staging.yaml',
+              ref: 'main',
+              inputs: {
+                image_tag: '${{ needs.get-tag.outputs.image_tag }}'
+              }
+            });
+            console.log('Triggered staging deployment');
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # NOTIFICATIONS
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  notify-slack:
+    name: "📢 Slack"
+    needs: [get-tag, deploy]
+    if: always()
+    runs-on: ${{ github.event.inputs.runner == 'github-hosted' && 'ubuntu-latest' || fromJSON('["self-hosted", "linux", "opsera"]') }}
+    steps:
+      - name: Send Slack Notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ needs.deploy.outputs.success == 'true' && '✅ QA Canary Succeeded' || '❌ QA Canary Failed' }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*App:*\nvoting01"},
+                    {"type": "mrkdwn", "text": "*Environment:*\nQA (Canary)"},
+                    {"type": "mrkdwn", "text": "*Tag:*\n${{ needs.get-tag.outputs.image_tag }}"},
+                    {"type": "mrkdwn", "text": "*Triggered by:*\n${{ github.actor }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [{
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "View Workflow"},
+                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

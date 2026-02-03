@@ -1,0 +1,73 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: voting01-qa
+
+resources:
+  - ../../base
+  - configmap.yaml
+  - serviceaccounts.yaml
+  - vote-rollout.yaml
+  - result-rollout.yaml
+  - worker-rollout.yaml
+  - vote-canary-service.yaml
+  - result-canary-service.yaml
+  - analysis-template.yaml
+
+commonLabels:
+  environment: qa
+
+patches:
+  # Remove base Deployments (replaced by Rollouts)
+  - target:
+      kind: Deployment
+      name: vote
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: vote
+  - target:
+      kind: Deployment
+      name: result
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: result
+  - target:
+      kind: Deployment
+      name: worker
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: worker
+  # Update Ingress hosts for QA
+  - target:
+      kind: Ingress
+      name: voting01-ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: vote-voting01-qa.agent.opsera.dev
+      - op: replace
+        path: /spec/rules/1/host
+        value: result-voting01-qa.agent.opsera.dev
+      - op: add
+        path: /metadata/annotations/nginx.ingress.kubernetes.io~1canary
+        value: "false"
+
+images:
+  - name: PLACEHOLDER_VOTE_IMAGE
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/voting01-vote
+    newTag: latest
+  - name: PLACEHOLDER_RESULT_IMAGE
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/voting01-result
+    newTag: latest
+  - name: PLACEHOLDER_WORKER_IMAGE
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/voting01-worker
+    newTag: latest
