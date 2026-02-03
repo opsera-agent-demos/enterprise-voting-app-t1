@@ -1,0 +1,76 @@
+# Vote Canary Rollout for QA Environment
+# RULE 130b: containerPort must match base Deployment (8080)
+# RULE 74b: Port 8080 for non-root containers
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: vote
+  labels:
+    app: vote
+spec:
+  replicas: 2
+  strategy:
+    canary:
+      canaryService: vote-canary
+      stableService: vote-stable
+      steps:
+        - setWeight: 10
+        - pause: {duration: 2m}
+        - analysis:
+            templates:
+              - templateName: piyush-demo-1-analysis
+            args:
+              - name: service-name
+                value: vote-canary
+        - setWeight: 30
+        - pause: {duration: 3m}
+        - setWeight: 60
+        - pause: {duration: 5m}
+        - setWeight: 100
+  selector:
+    matchLabels:
+      app: vote
+  template:
+    metadata:
+      labels:
+        app: vote
+        component: vote
+    spec:
+      serviceAccountName: piyush-demo-1-sa
+      containers:
+        - name: vote
+          image: vote:placeholder
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: piyush-demo-1-config
+          env:
+            - name: NEW_RELIC_APP_NAME
+              value: "opsera-piyush-demo-1-vote-qa"
+            - name: NEW_RELIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: newrelic-license
+                  key: license-key
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

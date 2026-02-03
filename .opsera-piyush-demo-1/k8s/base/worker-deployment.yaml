@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app: worker
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        component: worker
+    spec:
+      serviceAccountName: piyush-demo-1-sa
+      containers:
+        - name: worker
+          image: worker:placeholder
+          envFrom:
+            - configMapRef:
+                name: piyush-demo-1-config
+          env:
+            - name: NEW_RELIC_APP_NAME
+              value: "opsera-piyush-demo-1-worker"
+            - name: NEW_RELIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: newrelic-license
+                  key: license-key
+                  optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

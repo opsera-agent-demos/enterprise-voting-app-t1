@@ -1,0 +1,67 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: opsera-piyush-demo-1-staging
+
+resources:
+  - ../../base
+  - configmap.yaml
+  - serviceaccounts.yaml
+  - vote-rollout.yaml
+  - vote-preview-service.yaml
+  - result-rollout.yaml
+  - result-preview-service.yaml
+  - worker-rollout.yaml
+  - preview-ingress.yaml
+  - analysis-template.yaml
+
+# NOTE: commonLabels removed for staging overlay - causes label mismatch with Argo Rollouts (RULE 130d)
+
+images:
+  - name: vote
+    newName: PLACEHOLDER_ECR_URI/opsera/piyush-demo-1-vote
+    newTag: latest
+  - name: result
+    newName: PLACEHOLDER_ECR_URI/opsera/piyush-demo-1-result
+    newTag: latest
+  - name: worker
+    newName: PLACEHOLDER_ECR_URI/opsera/piyush-demo-1-worker
+    newTag: latest
+
+patches:
+  - target:
+      kind: Namespace
+      name: opsera-piyush-demo-1-dev
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: opsera-piyush-demo-1-staging
+  - target:
+      kind: Ingress
+      name: piyush-demo-1
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: opsera-piyush-demo-1-staging.agent.opsera.dev
+  # Set base Deployment replicas to 0 - Rollout manages pods (RULE 130)
+  - target:
+      kind: Deployment
+      name: vote
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0
+  - target:
+      kind: Deployment
+      name: result
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0
+  - target:
+      kind: Deployment
+      name: worker
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0

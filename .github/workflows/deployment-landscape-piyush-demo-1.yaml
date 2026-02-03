@@ -1,0 +1,122 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# DEPLOYMENT LANDSCAPE - piyush-demo-1
+# Auto-refresh stakeholder dashboard
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "Deployment Landscape (piyush-demo-1)"
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+env:
+  APP_NAME: piyush-demo-1
+  TENANT: opsera
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+  DOMAIN: agent.opsera.dev
+
+permissions:
+  contents: read
+
+jobs:
+  landscape:
+    name: "📊 Generate Landscape"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - name: Generate Dashboard
+        run: |
+          echo "# 📊 Deployment Landscape: ${{ env.APP_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Generated: $(date -u +'%Y-%m-%d %H:%M UTC')_" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Architecture
+          echo "## Architecture" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "Code → GitHub Actions → ECR → ArgoCD → EKS → Route53 → Users" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Environment Status Table
+          echo "## Environment Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Env | Strategy | Sync | Pods | Last Deploy | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|----------|------|------|-------------|-----|" >> $GITHUB_STEP_SUMMARY
+          
+          # Get ArgoCD status
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          
+          for ENV in dev qa staging; do
+            APP="${{ env.APP_NAME }}-${ENV}"
+            
+            # Strategy
+            case $ENV in
+              dev) STRATEGY="Rolling" ;;
+              qa) STRATEGY="Canary" ;;
+              staging) STRATEGY="Blue-Green" ;;
+            esac
+            
+            # ArgoCD status
+            SYNC=$(kubectl get application $APP -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            
+            # Pod count
+            aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+            NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-${ENV}"
+            PODS=$(kubectl get pods -n $NAMESPACE --no-headers 2>/dev/null | wc -l | tr -d ' ')
+            
+            # Last deploy from git
+            LAST_DEPLOY=$(git log -1 --format='%ci' -- ".opsera-${{ env.APP_NAME }}/k8s/overlays/${ENV}" 2>/dev/null | cut -d' ' -f1 || echo "N/A")
+            
+            URL="https://${{ env.TENANT }}-${{ env.APP_NAME }}-${ENV}.${{ env.DOMAIN }}"
+            
+            echo "| $ENV | $STRATEGY | $SYNC | $PODS | $LAST_DEPLOY | [$ENV]($URL) |" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Tool Links
+          echo "## Tool Links" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Tool | Purpose | Link |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Gitleaks | Secret scanning | [Security Tab](https://github.com/${{ github.repository }}/security) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Grype | Container scanning | [Security Tab](https://github.com/${{ github.repository }}/security) |" >> $GITHUB_STEP_SUMMARY
+          echo "| SonarQube | Code quality | Configured |" >> $GITHUB_STEP_SUMMARY
+          echo "| Slack | Notifications | Configured |" >> $GITHUB_STEP_SUMMARY
+          echo "| Jira | Issue tracking | Configured |" >> $GITHUB_STEP_SUMMARY
+          echo "| NewRelic | APM monitoring | Configured |" >> $GITHUB_STEP_SUMMARY
+          echo "| Prometheus | Metrics | monitoring namespace |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Workflows
+          echo "## Available Workflows" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Workflow | Command |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Bootstrap | \`gh workflow run \"00-bootstrap-infrastructure-${{ env.APP_NAME }}.yaml\"\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy DEV | \`gh workflow run \"ci-build-push-${{ env.APP_NAME }}-dev.yaml\"\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy QA | \`gh workflow run \"ci-build-push-${{ env.APP_NAME }}-qa.yaml\"\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Staging | \`gh workflow run \"ci-build-push-${{ env.APP_NAME }}-staging.yaml\"\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Promote | \`gh workflow run \"promote-${{ env.APP_NAME }}.yaml\" -f source=dev -f target=qa -f confirm=PROMOTE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Diagnostics | \`gh workflow run \"diagnostics-${{ env.APP_NAME }}.yaml\" -f environment=dev\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "_Powered by Opsera Code-to-Cloud Enterprise v0.909_" >> $GITHUB_STEP_SUMMARY

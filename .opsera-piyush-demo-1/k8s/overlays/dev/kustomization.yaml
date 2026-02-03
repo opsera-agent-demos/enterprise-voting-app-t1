@@ -1,0 +1,39 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: opsera-piyush-demo-1-dev
+
+resources:
+  - ../../base
+  - configmap.yaml
+  - serviceaccounts.yaml
+
+commonLabels:
+  environment: dev
+
+images:
+  - name: vote
+    newName: PLACEHOLDER_ECR_URI/opsera/piyush-demo-1-vote
+    newTag: latest
+  - name: result
+    newName: PLACEHOLDER_ECR_URI/opsera/piyush-demo-1-result
+    newTag: latest
+  - name: worker
+    newName: PLACEHOLDER_ECR_URI/opsera/piyush-demo-1-worker
+    newTag: latest
+
+patches:
+  - target:
+      kind: Namespace
+      name: opsera-piyush-demo-1-dev
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: opsera-piyush-demo-1-dev
+  - target:
+      kind: Ingress
+      name: piyush-demo-1
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: opsera-piyush-demo-1-dev.agent.opsera.dev

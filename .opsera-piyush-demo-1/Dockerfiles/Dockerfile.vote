@@ -1,0 +1,26 @@
+# Vote App - Python Flask with NewRelic APM
+# Port 8080 for non-root container (RULE 74b)
+FROM python:3.11-slim AS base
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/local/app
+
+COPY vote/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+FROM base AS final
+
+# Create non-root user
+RUN useradd -r -u 1001 appuser
+USER 1001
+
+COPY --chown=1001:1001 vote/ .
+
+# Port 8080 for non-root (RULE 74b)
+EXPOSE 8080
+
+# NewRelic-wrapped gunicorn on port 8080
+CMD ["gunicorn", "app:app", "-b", "0.0.0.0:8080", "--log-file", "-", "--access-logfile", "-", "--workers", "4", "--keep-alive", "0"]

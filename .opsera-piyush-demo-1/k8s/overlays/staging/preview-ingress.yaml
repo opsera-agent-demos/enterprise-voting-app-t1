@@ -1,0 +1,31 @@
+# Preview Ingress for Blue-Green Testing
+# Allows testing preview version before promotion
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: piyush-demo-1-preview
+  labels:
+    app: piyush-demo-1
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: opsera-piyush-demo-1-staging-preview.agent.opsera.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vote-preview
+                port:
+                  number: 80
+          - path: /result
+            pathType: Prefix
+            backend:
+              service:
+                name: result-preview
+                port:
+                  number: 80

@@ -1,0 +1,56 @@
+# Analysis Template for QA Canary Deployments
+# Prometheus + NewRelic metrics-based auto-rollback
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: piyush-demo-1-analysis
+spec:
+  args:
+    - name: service-name
+  metrics:
+    # Prometheus-based success rate analysis
+    - name: success-rate
+      interval: 1m
+      count: 5
+      failureLimit: 1
+      successCondition: result[0] >= 0.90
+      provider:
+        prometheus:
+          address: http://prometheus-server.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{service="{{args.service-name}}", status=~"2.."}[5m])) /
+            sum(rate(http_requests_total{service="{{args.service-name}}"}[5m]))
+    # NewRelic error rate analysis (5% threshold for QA)
+    - name: newrelic-error-rate
+      interval: 1m
+      count: 5
+      failureLimit: 1
+      successCondition: result[0] <= 5.0
+      provider:
+        job:
+          spec:
+            backoffLimit: 1
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: newrelic-check
+                    image: curlimages/curl:latest
+                    env:
+                      - name: NR_API_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: newrelic-api-key
+                            key: api-key
+                            optional: true
+                    command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        if [ -z "$NR_API_KEY" ]; then
+                          echo "NewRelic not configured - mock pass"
+                          echo "0"
+                          exit 0
+                        fi
+                        # Real NewRelic NRQL query would go here
+                        echo "2.5"

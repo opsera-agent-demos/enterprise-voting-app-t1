@@ -1,0 +1,189 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# PROMOTE WORKFLOW - piyush-demo-1
+# Promotes tested images between environments (DEV → QA → Staging)
+# RULE 126: Use promotion for progressive delivery (immutable deployments)
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "Promote (piyush-demo-1)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_environment:
+        description: 'Source environment'
+        type: choice
+        options: [dev, qa]
+        required: true
+      target_environment:
+        description: 'Target environment'
+        type: choice
+        options: [qa, staging]
+        required: true
+      confirm:
+        description: 'Type "PROMOTE" to confirm'
+        type: string
+        required: true
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['github-hosted', 'self-hosted']
+        default: 'github-hosted'
+
+env:
+  APP_NAME: piyush-demo-1
+  TENANT: opsera
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+  DOMAIN: agent.opsera.dev
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: "🔍 Validate"
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    outputs:
+      image_tag: ${{ steps.get-tag.outputs.image_tag }}
+    steps:
+      - name: Check Confirmation
+        if: inputs.confirm != 'PROMOTE'
+        run: |
+          echo "❌ Promotion not confirmed. Type 'PROMOTE' to confirm."
+          exit 1
+
+      - name: Validate Promotion Path
+        run: |
+          SOURCE="${{ inputs.source_environment }}"
+          TARGET="${{ inputs.target_environment }}"
+          
+          # Validate allowed paths
+          if [ "$SOURCE" == "dev" ] && [ "$TARGET" == "qa" ]; then
+            echo "✅ Valid: DEV → QA"
+          elif [ "$SOURCE" == "qa" ] && [ "$TARGET" == "staging" ]; then
+            echo "✅ Valid: QA → Staging"
+          else
+            echo "❌ Invalid promotion path: $SOURCE → $TARGET"
+            echo "Allowed: dev → qa, qa → staging"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Get Current Image Tag
+        id: get-tag
+        run: |
+          KUSTOMIZATION=".opsera-${{ env.APP_NAME }}/k8s/overlays/${{ inputs.source_environment }}/kustomization.yaml"
+          IMAGE_TAG=$(grep "newTag:" "$KUSTOMIZATION" | head -1 | awk '{print $2}')
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Current tag in ${{ inputs.source_environment }}: $IMAGE_TAG"
+
+  verify-source:
+    name: "🏥 Verify Source Health"
+    needs: validate
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - name: Check Source Environment
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-${{ inputs.source_environment }}"
+          
+          READY=$(kubectl get pods -n $NAMESPACE -l app=vote --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+          
+          if [ "$READY" -gt 0 ]; then
+            echo "✅ Source environment healthy: $READY pods running"
+          else
+            echo "❌ Source environment unhealthy: No running pods"
+            exit 1
+          fi
+
+  promote:
+    name: "🚀 Promote to ${{ inputs.target_environment }}"
+    needs: [validate, verify-source]
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update Target Kustomization
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          IMAGE_TAG="${{ needs.validate.outputs.image_tag }}"
+          
+          cd .opsera-${{ env.APP_NAME }}/k8s/overlays/${{ inputs.target_environment }}
+          
+          sed -i "s|PLACEHOLDER_ECR_URI|${ECR_URI}|g" kustomization.yaml
+          sed -i "s|newTag: .*|newTag: ${IMAGE_TAG}|g" kustomization.yaml
+          
+          echo "Updated ${{ inputs.target_environment }} to tag: ${IMAGE_TAG}"
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .opsera-${{ env.APP_NAME }}/k8s/overlays/${{ inputs.target_environment }}
+          git commit -m "promote(${{ inputs.target_environment }}): ${{ needs.validate.outputs.image_tag }} from ${{ inputs.source_environment }} [skip ci]
+
+Promoted by: ${{ github.actor }}
+Source: ${{ inputs.source_environment }}
+Image: ${{ needs.validate.outputs.image_tag }}"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - name: Force ArgoCD Sync
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl annotate application ${{ env.APP_NAME }}-${{ inputs.target_environment }} -n argocd argocd.argoproj.io/refresh=hard --overwrite || true
+
+      - name: Summary
+        run: |
+          echo "### 🚀 Promotion Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Source | ${{ inputs.source_environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | ${{ inputs.target_environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tag | \`${{ needs.validate.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Promoted By | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** https://${{ env.TENANT }}-${{ env.APP_NAME }}-${{ inputs.target_environment }}.${{ env.DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    name: "📢 Notify"
+    needs: [validate, promote]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack Notification
+        if: needs.promote.result == 'success'
+        run: |
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"✅ Promoted piyush-demo-1 from ${{ inputs.source_environment }} → ${{ inputs.target_environment }} (tag: ${{ needs.validate.outputs.image_tag }})\"}" \
+              "${{ secrets.SLACK_WEBHOOK_URL }}"
+          fi

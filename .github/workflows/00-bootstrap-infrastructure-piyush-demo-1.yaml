@@ -1,0 +1,269 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# BOOTSTRAP INFRASTRUCTURE - piyush-demo-1
+# RULE 127: MUST complete before running ANY CI/CD workflows
+# Creates: ECR repos, namespaces, service accounts, ArgoCD apps
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "00-Bootstrap (piyush-demo-1)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        type: choice
+        options: [apply, destroy]
+        default: 'apply'
+      skip_ecr:
+        description: 'Skip ECR creation'
+        type: boolean
+        default: false
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['github-hosted', 'self-hosted']
+        default: 'github-hosted'
+
+env:
+  APP_NAME: piyush-demo-1
+  TENANT: opsera
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+  DOMAIN: agent.opsera.dev
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # VALIDATE INPUTS
+  # ═══════════════════════════════════════════════════════════════════════════════
+  validate:
+    name: "🔍 Validate"
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Configuration
+        run: |
+          echo "### 🔍 Bootstrap Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| App Name | ${{ env.APP_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tenant | ${{ env.TENANT }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Region | ${{ env.AWS_REGION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Hub Cluster | ${{ env.HUB_CLUSTER }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Spoke Cluster | ${{ env.SPOKE_CLUSTER }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Action | ${{ inputs.action }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # CREATE ECR REPOSITORIES
+  # ═══════════════════════════════════════════════════════════════════════════════
+  create-ecr:
+    name: "📦 Create ECR Repos"
+    needs: validate
+    if: inputs.action == 'apply' && inputs.skip_ecr != true
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create ECR Repositories
+        run: |
+          for COMPONENT in vote result worker; do
+            REPO_NAME="${{ env.TENANT }}/${{ env.APP_NAME }}-${COMPONENT}"
+            
+            if aws ecr describe-repositories --repository-names "$REPO_NAME" --region ${{ env.AWS_REGION }} 2>/dev/null; then
+              echo "✅ ECR repo exists: $REPO_NAME"
+            else
+              aws ecr create-repository \
+                --repository-name "$REPO_NAME" \
+                --region ${{ env.AWS_REGION }} \
+                --image-scanning-configuration scanOnPush=true \
+                --tags Key=tenant,Value=${{ env.TENANT }} Key=app,Value=${{ env.APP_NAME }}
+              echo "✅ Created ECR repo: $REPO_NAME"
+            fi
+          done
+
+      - name: Summary
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "### 📦 ECR Repositories" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Repository |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|------------|" >> $GITHUB_STEP_SUMMARY
+          for COMPONENT in vote result worker; do
+            echo "| $COMPONENT | \`${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.TENANT }}/${{ env.APP_NAME }}-${COMPONENT}\` |" >> $GITHUB_STEP_SUMMARY
+          done
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # CREATE NAMESPACES
+  # ═══════════════════════════════════════════════════════════════════════════════
+  create-namespaces:
+    name: "🏗️ Create Namespaces"
+    needs: [validate, create-ecr]
+    if: always() && inputs.action == 'apply' && needs.validate.result == 'success'
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - name: Configure Spoke Cluster
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: Create Namespaces
+        run: |
+          for ENV in dev qa staging; do
+            NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-${ENV}"
+            kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+            kubectl label namespace $NAMESPACE \
+              app=${{ env.APP_NAME }} \
+              environment=${ENV} \
+              tenant=${{ env.TENANT }} \
+              --overwrite
+            echo "✅ Namespace: $NAMESPACE"
+          done
+
+      - name: Create NewRelic Secrets
+        run: |
+          for ENV in dev qa staging; do
+            NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-${ENV}"
+            
+            # Create newrelic-license secret if NEWRELIC_LICENSE_KEY is set
+            if [ -n "${{ secrets.NEWRELIC_LICENSE_KEY }}" ]; then
+              kubectl create secret generic newrelic-license \
+                -n $NAMESPACE \
+                --from-literal=license-key="${{ secrets.NEWRELIC_LICENSE_KEY }}" \
+                --dry-run=client -o yaml | kubectl apply -f -
+              echo "✅ NewRelic secret in $NAMESPACE"
+            fi
+          done
+
+      - name: Summary
+        run: |
+          echo "### 🏗️ Namespaces Created" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Namespace |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|-----------|" >> $GITHUB_STEP_SUMMARY
+          for ENV in dev qa staging; do
+            echo "| $ENV | \`${{ env.TENANT }}-${{ env.APP_NAME }}-${ENV}\` |" >> $GITHUB_STEP_SUMMARY
+          done
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DEPLOY ARGOCD APPLICATIONS
+  # ═══════════════════════════════════════════════════════════════════════════════
+  deploy-argocd:
+    name: "🚀 Deploy ArgoCD Apps"
+    needs: [validate, create-namespaces]
+    if: always() && inputs.action == 'apply' && needs.create-namespaces.result == 'success'
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - name: Configure Hub Cluster
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: Create Repository Secret
+        run: |
+          SECRET_NAME="repo-${{ env.APP_NAME }}"
+          REPO_URL="https://github.com/${{ github.repository }}"
+          
+          if kubectl get secret $SECRET_NAME -n argocd &>/dev/null; then
+            echo "✅ Repository secret exists"
+          else
+            kubectl create secret generic $SECRET_NAME -n argocd \
+              --from-literal=type=git \
+              --from-literal=url="$REPO_URL" \
+              --from-literal=username=git \
+              --from-literal=password="${{ secrets.GH_PAT }}"
+            
+            kubectl label secret $SECRET_NAME -n argocd \
+              argocd.argoproj.io/secret-type=repository --overwrite
+            
+            echo "✅ Created repository secret"
+          fi
+
+      - name: Apply ArgoCD Applications
+        run: |
+          for ENV in dev qa staging; do
+            APP_FILE=".opsera-${{ env.APP_NAME }}/argocd/${ENV}/application.yaml"
+            if [ -f "$APP_FILE" ]; then
+              kubectl apply -f "$APP_FILE"
+              echo "✅ Applied ArgoCD application: ${{ env.APP_NAME }}-${ENV}"
+            else
+              echo "⚠️ Application file not found: $APP_FILE"
+            fi
+          done
+
+      - name: Verify Applications
+        run: |
+          sleep 10
+          echo "### 🚀 ArgoCD Applications" >> $GITHUB_STEP_SUMMARY
+          echo "| Application | Sync Status | Health |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|-------------|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          for ENV in dev qa staging; do
+            APP_NAME="${{ env.APP_NAME }}-${ENV}"
+            SYNC=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            HEALTH=$(kubectl get application $APP_NAME -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            echo "| $APP_NAME | $SYNC | $HEALTH |" >> $GITHUB_STEP_SUMMARY
+          done
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # SUMMARY
+  # ═══════════════════════════════════════════════════════════════════════════════
+  summary:
+    name: "📊 Summary"
+    needs: [validate, create-ecr, create-namespaces, deploy-argocd]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "# 🎉 Bootstrap Complete: ${{ env.APP_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ECR | ${{ needs.create-ecr.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Namespaces | ${{ needs.create-namespaces.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ArgoCD | ${{ needs.deploy-argocd.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Run DEV deployment: \`gh workflow run \"ci-build-push-${{ env.APP_NAME }}-dev.yaml\"\`" >> $GITHUB_STEP_SUMMARY
+          echo "2. Promote to QA: \`gh workflow run \"promote-${{ env.APP_NAME }}.yaml\" -f source=dev -f target=qa\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Promote to Staging: \`gh workflow run \"promote-${{ env.APP_NAME }}.yaml\" -f source=qa -f target=staging\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- DEV: https://${{ env.TENANT }}-${{ env.APP_NAME }}-dev.${{ env.DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+          echo "- QA: https://${{ env.TENANT }}-${{ env.APP_NAME }}-qa.${{ env.DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Staging: https://${{ env.TENANT }}-${{ env.APP_NAME }}-staging.${{ env.DOMAIN }}" >> $GITHUB_STEP_SUMMARY

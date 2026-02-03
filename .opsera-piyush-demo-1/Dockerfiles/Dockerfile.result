@@ -1,0 +1,30 @@
+# Result App - Node.js with NewRelic APM
+# Port 8080 for non-root container (RULE 74b)
+FROM node:18-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl tini && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/local/app
+
+COPY result/package*.json ./
+
+# Use npm install instead of npm ci (RULE 73)
+RUN npm install --omit=dev && \
+    npm cache clean --force && \
+    mv /usr/local/app/node_modules /node_modules
+
+COPY result/ .
+
+# Create non-root user
+RUN useradd -r -u 1001 appuser && \
+    chown -R 1001:1001 /usr/local/app
+USER 1001
+
+# Port 8080 for non-root (RULE 74b)
+ENV PORT=8080
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "server.js"]

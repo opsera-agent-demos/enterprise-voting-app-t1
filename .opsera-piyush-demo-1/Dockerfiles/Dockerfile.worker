@@ -1,0 +1,39 @@
+# Worker App - .NET with NewRelic APM
+FROM --platform=${BUILDPLATFORM} mcr.microsoft.com/dotnet/sdk:7.0 AS build
+ARG TARGETPLATFORM
+ARG TARGETARCH
+ARG BUILDPLATFORM
+RUN echo "I am running on $BUILDPLATFORM, building for $TARGETPLATFORM"
+
+WORKDIR /source
+COPY worker/*.csproj .
+RUN dotnet restore -a $TARGETARCH
+
+COPY worker/ .
+RUN dotnet publish -c release -o /app -a $TARGETARCH --self-contained false --no-restore
+
+# Runtime image with NewRelic .NET Agent
+FROM mcr.microsoft.com/dotnet/runtime:7.0
+
+# Install New Relic .NET Agent
+RUN apt-get update && apt-get install -y wget ca-certificates gnupg \
+    && echo 'deb http://apt.newrelic.com/debian/ newrelic non-free' | tee /etc/apt/sources.list.d/newrelic.list \
+    && wget -q https://download.newrelic.com/548C16BF.gpg -O- | apt-key add - \
+    && apt-get update \
+    && apt-get install -y newrelic-dotnet-agent \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set New Relic .NET agent environment variables
+ENV CORECLR_ENABLE_PROFILING=1 \
+    CORECLR_PROFILER={36032161-FFC0-4B61-B559-F6C5D41BAE5A} \
+    CORECLR_NEWRELIC_HOME=/usr/local/newrelic-netcore20-agent \
+    CORECLR_PROFILER_PATH=/usr/local/newrelic-netcore20-agent/libNewRelicProfiler.so \
+    NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
+
+# Create non-root user
+RUN useradd -r -u 1001 appuser
+USER 1001
+
+WORKDIR /app
+COPY --from=build /app .
+ENTRYPOINT ["dotnet", "Worker.dll"]

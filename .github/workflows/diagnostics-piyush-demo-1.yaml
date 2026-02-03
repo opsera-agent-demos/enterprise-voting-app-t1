@@ -1,0 +1,205 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# DIAGNOSTICS WORKFLOW - piyush-demo-1
+# RULE 50: Full pipeline debugging for troubleshooting
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "Diagnostics (piyush-demo-1)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to diagnose'
+        type: choice
+        options: [dev, qa, staging, all]
+        default: 'dev'
+      diagnostic_type:
+        description: 'Type of diagnostic'
+        type: choice
+        options:
+          - full-pipeline
+          - pod-logs
+          - argocd-status
+          - force-sync
+        default: 'full-pipeline'
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['github-hosted', 'self-hosted']
+        default: 'github-hosted'
+
+env:
+  APP_NAME: piyush-demo-1
+  TENANT: opsera
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+  DOMAIN: agent.opsera.dev
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostics:
+    name: "🔬 Diagnostics"
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # ECR CHECK
+      # ═══════════════════════════════════════════════════════════════════════════
+      - name: "📦 ECR Repositories"
+        if: inputs.diagnostic_type == 'full-pipeline'
+        run: |
+          echo "### 📦 ECR Repositories" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Latest Tags |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------------|" >> $GITHUB_STEP_SUMMARY
+          
+          for COMPONENT in vote result worker; do
+            REPO="${{ env.TENANT }}/${{ env.APP_NAME }}-${COMPONENT}"
+            TAGS=$(aws ecr describe-images --repository-name "$REPO" --query 'imageDetails[*].imageTags[0]' --output text 2>/dev/null | head -3 | tr '\n' ', ' || echo "N/A")
+            echo "| $COMPONENT | $TAGS |" >> $GITHUB_STEP_SUMMARY
+          done
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # ARGOCD STATUS
+      # ═══════════════════════════════════════════════════════════════════════════
+      - name: "🔄 ArgoCD Applications"
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          
+          echo "### 🔄 ArgoCD Applications" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Application | Sync | Health | Message |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.environment }}" == "all" ]; then
+            ENVS="dev qa staging"
+          else
+            ENVS="${{ inputs.environment }}"
+          fi
+          
+          for ENV in $ENVS; do
+            APP="${{ env.APP_NAME }}-${ENV}"
+            SYNC=$(kubectl get application $APP -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            HEALTH=$(kubectl get application $APP -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            MSG=$(kubectl get application $APP -n argocd -o jsonpath='{.status.conditions[0].message}' 2>/dev/null | head -c 50 || echo "")
+            echo "| $APP | $SYNC | $HEALTH | $MSG |" >> $GITHUB_STEP_SUMMARY
+          done
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # POD STATUS
+      # ═══════════════════════════════════════════════════════════════════════════
+      - name: "🐳 Pod Status"
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          
+          echo "### 🐳 Pod Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.environment }}" == "all" ]; then
+            ENVS="dev qa staging"
+          else
+            ENVS="${{ inputs.environment }}"
+          fi
+          
+          for ENV in $ENVS; do
+            NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-${ENV}"
+            echo "#### ${ENV}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            kubectl get pods -n $NAMESPACE -o wide 2>/dev/null || echo "Namespace not found or no pods"
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # POD LOGS
+      # ═══════════════════════════════════════════════════════════════════════════
+      - name: "📋 Pod Logs"
+        if: inputs.diagnostic_type == 'pod-logs' || inputs.diagnostic_type == 'full-pipeline'
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          
+          if [ "${{ inputs.environment }}" == "all" ]; then
+            ENV="dev"
+          else
+            ENV="${{ inputs.environment }}"
+          fi
+          
+          NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-${ENV}"
+          
+          echo "### 📋 Pod Logs (${ENV})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          for COMPONENT in vote result worker; do
+            POD=$(kubectl get pods -n $NAMESPACE -l app=$COMPONENT -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$POD" ]; then
+              echo "#### $COMPONENT ($POD)" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              kubectl logs $POD -n $NAMESPACE --tail=30 2>/dev/null || echo "No logs available"
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # FORCE SYNC
+      # ═══════════════════════════════════════════════════════════════════════════
+      - name: "⚡ Force Sync"
+        if: inputs.diagnostic_type == 'force-sync'
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          
+          if [ "${{ inputs.environment }}" == "all" ]; then
+            ENVS="dev qa staging"
+          else
+            ENVS="${{ inputs.environment }}"
+          fi
+          
+          echo "### ⚡ Force Sync Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          for ENV in $ENVS; do
+            APP="${{ env.APP_NAME }}-${ENV}"
+            kubectl annotate application $APP -n argocd argocd.argoproj.io/refresh=hard --overwrite 2>/dev/null && \
+              echo "✅ Triggered sync for $APP" >> $GITHUB_STEP_SUMMARY || \
+              echo "❌ Failed to sync $APP" >> $GITHUB_STEP_SUMMARY
+          done
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # HEALTH CHECK
+      # ═══════════════════════════════════════════════════════════════════════════
+      - name: "🏥 Endpoint Health"
+        if: inputs.diagnostic_type == 'full-pipeline'
+        run: |
+          echo "### 🏥 Endpoint Health" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | URL | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.environment }}" == "all" ]; then
+            ENVS="dev qa staging"
+          else
+            ENVS="${{ inputs.environment }}"
+          fi
+          
+          for ENV in $ENVS; do
+            URL="https://${{ env.TENANT }}-${{ env.APP_NAME }}-${ENV}.${{ env.DOMAIN }}"
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL" --connect-timeout 5 2>/dev/null || echo "000")
+            if [ "$STATUS" == "200" ] || [ "$STATUS" == "301" ] || [ "$STATUS" == "302" ]; then
+              echo "| $ENV | $URL | ✅ $STATUS |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $ENV | $URL | ❌ $STATUS |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done

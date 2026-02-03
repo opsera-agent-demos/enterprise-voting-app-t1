@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opsera-piyush-demo-1-dev
+  labels:
+    app: piyush-demo-1
+    tenant: opsera
+    app.kubernetes.io/managed-by: argocd

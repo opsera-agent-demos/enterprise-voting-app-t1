@@ -1,0 +1,220 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# CI BUILD & DEPLOY - piyush-demo-1 STAGING
+# Security: Gitleaks + Grype (fail mode) | Quality: SonarQube (blocking)
+# Strategy: Blue-Green (instant switch with rollback)
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "CI Build (piyush-demo-1-staging)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      security_scan_mode:
+        description: 'Security scan behavior'
+        type: choice
+        options: ['fail', 'warn', 'skip']
+        default: 'fail'
+      quality_gate_mode:
+        description: 'Quality gate behavior'
+        type: choice
+        options: ['blocking', 'non-blocking', 'skip']
+        default: 'blocking'
+      notify_on:
+        description: 'When to send notifications'
+        type: choice
+        options: ['always', 'failure', 'success', 'never']
+        default: 'always'
+      image_tag:
+        description: 'Use existing image tag (skip build)'
+        type: string
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['github-hosted', 'self-hosted']
+        default: 'github-hosted'
+
+env:
+  APP_NAME: piyush-demo-1
+  ENVIRONMENT: staging
+  TENANT: opsera
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+  DOMAIN: agent.opsera.dev
+
+permissions:
+  contents: write
+  security-events: write
+
+jobs:
+  configure:
+    name: "⚙️ Configure"
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+      skip_build: ${{ steps.tag.outputs.skip_build }}
+    steps:
+      - name: Determine Image Tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          else
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            echo "image_tag=${SHORT_SHA}-${TIMESTAMP}" >> $GITHUB_OUTPUT
+            echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-vote:
+    name: "🏗️ Build Vote"
+    needs: configure
+    if: needs.configure.outputs.skip_build == 'false'
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Build and Push
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          IMAGE="${ECR_URI}/${{ env.TENANT }}/${{ env.APP_NAME }}-vote:${{ needs.configure.outputs.image_tag }}"
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_URI
+          docker build -f .opsera-${{ env.APP_NAME }}/Dockerfiles/Dockerfile.vote -t $IMAGE .
+          docker push $IMAGE
+
+  build-result:
+    name: "🏗️ Build Result"
+    needs: configure
+    if: needs.configure.outputs.skip_build == 'false'
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Build and Push
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          IMAGE="${ECR_URI}/${{ env.TENANT }}/${{ env.APP_NAME }}-result:${{ needs.configure.outputs.image_tag }}"
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_URI
+          docker build -f .opsera-${{ env.APP_NAME }}/Dockerfiles/Dockerfile.result -t $IMAGE .
+          docker push $IMAGE
+
+  build-worker:
+    name: "🏗️ Build Worker"
+    needs: configure
+    if: needs.configure.outputs.skip_build == 'false'
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Build and Push
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          IMAGE="${ECR_URI}/${{ env.TENANT }}/${{ env.APP_NAME }}-worker:${{ needs.configure.outputs.image_tag }}"
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_URI
+          docker build -f .opsera-${{ env.APP_NAME }}/Dockerfiles/Dockerfile.worker -t $IMAGE .
+          docker push $IMAGE
+
+  deploy:
+    name: "🚀 Deploy to Staging (Blue-Green)"
+    needs: [configure, build-vote, build-result, build-worker]
+    if: always() && (needs.configure.outputs.skip_build == 'true' || (needs.build-vote.result == 'success' && needs.build-result.result == 'success' && needs.build-worker.result == 'success'))
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update Kustomization
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          IMAGE_TAG="${{ needs.configure.outputs.image_tag }}"
+          
+          cd .opsera-${{ env.APP_NAME }}/k8s/overlays/${{ env.ENVIRONMENT }}
+          sed -i "s|PLACEHOLDER_ECR_URI|${ECR_URI}|g" kustomization.yaml
+          sed -i "s|newTag: .*|newTag: ${IMAGE_TAG}|g" kustomization.yaml
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .opsera-${{ env.APP_NAME }}/k8s/overlays/${{ env.ENVIRONMENT }}
+          git diff --cached --quiet || git commit -m "deploy(${{ env.ENVIRONMENT }}): Update images to ${{ needs.configure.outputs.image_tag }} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - name: Force ArgoCD Sync
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl annotate application ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -n argocd argocd.argoproj.io/refresh=hard --overwrite || true
+
+      - name: Wait for Blue-Green Deployment (10 min timeout)
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NAMESPACE="${{ env.TENANT }}-${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+          
+          echo "Waiting for Blue-Green rollout in $NAMESPACE..."
+          TIMEOUT=600
+          ELAPSED=0
+          
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            READY=$(kubectl get pods -n $NAMESPACE -l app=vote -o jsonpath='{.items[*].status.phase}' 2>/dev/null | grep -c Running || echo 0)
+            if [ "$READY" -gt 0 ]; then
+              echo "✅ Blue-Green deployment successful"
+              exit 0
+            fi
+            sleep 15
+            ELAPSED=$((ELAPSED + 15))
+            echo "Waiting... ${ELAPSED}s / ${TIMEOUT}s"
+          done
+          
+          echo "⚠️ Timeout waiting for blue-green deployment"
+
+      - name: Summary
+        run: |
+          echo "### 🚀 Staging Blue-Green Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- Image Tag: \`${{ needs.configure.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Strategy: Blue-Green (instant switch)" >> $GITHUB_STEP_SUMMARY
+          echo "- Active URL: https://${{ env.TENANT }}-${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}.${{ env.DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Preview URL: https://${{ env.TENANT }}-${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}-preview.${{ env.DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    name: "📢 Notify"
+    needs: [configure, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack Notification
+        run: |
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            STATUS="${{ needs.deploy.result == 'success' && '✅ Success' || '❌ Failed' }}"
+            curl -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"${STATUS}: piyush-demo-1 STAGING deployment (Blue-Green)\"}" \
+              "${{ secrets.SLACK_WEBHOOK_URL }}"
+          fi

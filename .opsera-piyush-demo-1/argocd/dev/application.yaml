@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: piyush-demo-1-dev
+  namespace: argocd
+  labels:
+    app: piyush-demo-1
+    environment: dev
+    tenant: opsera
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/opsera-ai/enterprise-voting-demo-only
+    targetRevision: HEAD
+    path: .opsera-piyush-demo-1/k8s/overlays/dev
+  destination:
+    name: opsera-usw2-np
+    namespace: opsera-piyush-demo-1-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
