@@ -7,11 +7,15 @@
 
 ## 🚀 Deployment Dashboard
 
-| Environment | App | Status | Last Deploy |
-|-------------|-----|--------|-------------|
-| 🔧 **DEV** | [Vote](https://vote-voting01-dev.agent.opsera.dev) / [Result](https://result-voting01-dev.agent.opsera.dev) | Auto-deploy on push | Rolling |
-| 🧪 **QA** | [Vote](https://vote-voting01-qa.agent.opsera.dev) / [Result](https://result-voting01-qa.agent.opsera.dev) | Manual trigger | 🐤 Canary |
-| 🎭 **Staging** | [Vote](https://vote-voting01-staging.agent.opsera.dev) / [Result](https://result-voting01-staging.agent.opsera.dev) | Approval required | 🔵🟢 Blue-Green |
+<!-- DEPLOYMENT-STATUS:START - Auto-updated by landscape workflow -->
+| Environment | App | Last Deploy | Owner | Recent Deployments |
+|-------------|-----|-------------|-------|-------------------|
+| 🔧 **DEV** | [Vote](https://vote-voting01-dev.agent.opsera.dev) / [Result](https://result-voting01-dev.agent.opsera.dev) | - | - | _Run landscape workflow_ |
+| 🧪 **QA** | [Vote](https://vote-voting01-qa.agent.opsera.dev) / [Result](https://result-voting01-qa.agent.opsera.dev) | - | - | _Run landscape workflow_ |
+| 🎭 **Staging** | [Vote](https://vote-voting01-staging.agent.opsera.dev) / [Result](https://result-voting01-staging.agent.opsera.dev) | - | - | _Run landscape workflow_ |
+
+> 📅 _Last updated: Never_ | [🔄 Refresh](https://github.com/opsera-agentic/enterprise-voting-demo-only/actions/workflows/deployment-landscape-voting01.yaml)
+<!-- DEPLOYMENT-STATUS:END -->
 
 ### Quick Actions
 
@@ -22,8 +26,6 @@
 | 🧪 Deploy to QA | [▶️ Run](https://github.com/opsera-agentic/enterprise-voting-demo-only/actions/workflows/ci-build-push-voting01-qa.yaml) |
 | 🎭 Deploy to Staging | [▶️ Run](https://github.com/opsera-agentic/enterprise-voting-demo-only/actions/workflows/ci-build-push-voting01-staging.yaml) |
 | ⬆️ Promote Environment | [▶️ Run](https://github.com/opsera-agentic/enterprise-voting-demo-only/actions/workflows/promote-voting01.yaml) |
-
-> 💡 **Tip:** Click the "📊 Deployment Landscape" badge above to see the full deployment report with version history, health status, and architecture diagrams.
 
 ---
 
