@@ -64,6 +64,8 @@ jobs:
         run: |
           # Function to get deployment history for an environment
           # Format: SHA~TAG~TIMESTAMP~AUTHOR (uses ~ as field separator, ; as record separator)
+          # Note: AUTHOR is looked up from the source commit (extracted from image tag)
+          #       to show the actual code author, not github-actions[bot]
           get_history() {
             local env=$1
             git log --oneline --grep="deploy(voting01-${env}):" --format="%H|%s|%ct|%an" -n 5 2>/dev/null | while read line; do
@@ -72,7 +74,14 @@ jobs:
                 SHORT_SHA=$(echo "$SHA" | cut -c1-7)
                 MSG=$(echo "$line" | cut -d'|' -f2 | sed 's/deploy(voting01-'${env}'): //' | sed 's/ \[skip ci\]//')
                 TIMESTAMP=$(echo "$line" | cut -d'|' -f3)
-                AUTHOR=$(echo "$line" | cut -d'|' -f4)
+
+                # Extract source commit SHA from image tag (format: sha-timestamp, e.g., f6487b9-20260203191222)
+                SOURCE_SHA=$(echo "$MSG" | cut -d'-' -f1)
+
+                # Look up the actual author of the source commit
+                # This shows who made the code change, not github-actions[bot]
+                AUTHOR=$(git log -1 --format="%an" "$SOURCE_SHA" 2>/dev/null || echo "Unknown")
+
                 echo "${SHORT_SHA}~${MSG}~${TIMESTAMP}~${AUTHOR}"
               fi
             done | tr '\n' ';' | sed 's/;$//'
@@ -128,12 +137,128 @@ jobs:
           done
 
   # ═══════════════════════════════════════════════════════════════════════════════
+  # COLLECT LAST DEPLOY STATUS
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  collect-workflow-status:
+    name: "🔄 Workflow Status"
+    runs-on: ubuntu-latest
+    outputs:
+      dev_status: ${{ steps.status.outputs.dev_status }}
+      dev_jobs: ${{ steps.status.outputs.dev_jobs }}
+      dev_run_id: ${{ steps.status.outputs.dev_run_id }}
+      dev_has_failures: ${{ steps.status.outputs.dev_has_failures }}
+      qa_status: ${{ steps.status.outputs.qa_status }}
+      qa_jobs: ${{ steps.status.outputs.qa_jobs }}
+      staging_status: ${{ steps.status.outputs.staging_status }}
+      staging_jobs: ${{ steps.status.outputs.staging_jobs }}
+    steps:
+      - name: Get Last Workflow Runs
+        id: status
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          # Function to get workflow status and jobs
+          get_workflow_status() {
+            local workflow=$1
+            local env_name=$2
+
+            # Get the last completed run
+            RUN=$(gh api repos/${{ env.GITHUB_REPO }}/actions/workflows/${workflow}/runs \
+              --jq '.workflow_runs | map(select(.status == "completed")) | .[0]' 2>/dev/null || echo "{}")
+
+            if [ "$RUN" = "{}" ] || [ -z "$RUN" ] || [ "$RUN" = "null" ]; then
+              echo "${env_name}_status=unknown" >> $GITHUB_OUTPUT
+              echo "${env_name}_jobs=" >> $GITHUB_OUTPUT
+              echo "${env_name}_run_id=" >> $GITHUB_OUTPUT
+              echo "${env_name}_has_failures=false" >> $GITHUB_OUTPUT
+              return
+            fi
+
+            RUN_ID=$(echo "$RUN" | jq -r '.id')
+            CONCLUSION=$(echo "$RUN" | jq -r '.conclusion')
+
+            echo "${env_name}_status=${CONCLUSION}" >> $GITHUB_OUTPUT
+            echo "${env_name}_run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+
+            # Get job details
+            JOBS=$(gh api repos/${{ env.GITHUB_REPO }}/actions/runs/${RUN_ID}/jobs \
+              --jq '[.jobs[] | {name: .name, status: .conclusion, duration: ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601))}]' 2>/dev/null || echo "[]")
+
+            # Encode jobs as base64 to preserve JSON structure
+            JOBS_B64=$(echo "$JOBS" | base64 -w 0)
+            echo "${env_name}_jobs=${JOBS_B64}" >> $GITHUB_OUTPUT
+
+            # Check for failures
+            HAS_FAILURES=$(echo "$JOBS" | jq 'any(.[]; .status == "failure")')
+            echo "${env_name}_has_failures=${HAS_FAILURES}" >> $GITHUB_OUTPUT
+          }
+
+          get_workflow_status "ci-build-push-voting01-dev.yaml" "dev"
+          get_workflow_status "ci-build-push-voting01-qa.yaml" "qa"
+          get_workflow_status "ci-build-push-voting01-staging.yaml" "staging"
+
+      - name: Create Jira Ticket on Failure
+        if: steps.status.outputs.dev_has_failures == 'true'
+        continue-on-error: true
+        env:
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+        run: |
+          if [ -z "$JIRA_API_TOKEN" ] || [ -z "$JIRA_BASE_URL" ]; then
+            echo "⚠️ Jira not configured - skipping ticket creation"
+            exit 0
+          fi
+
+          RUN_ID="${{ steps.status.outputs.dev_run_id }}"
+          RUN_URL="https://github.com/${{ env.GITHUB_REPO }}/actions/runs/${RUN_ID}"
+
+          RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Basic $(echo -n "${JIRA_EMAIL}:${JIRA_API_TOKEN}" | base64)" \
+            -H "Content-Type: application/json" \
+            "${JIRA_BASE_URL}/rest/api/3/issue" \
+            -d '{
+              "fields": {
+                "project": {"key": "DEPLOY"},
+                "summary": "[voting01-dev] CI/CD Pipeline Failure",
+                "description": {
+                  "type": "doc",
+                  "version": 1,
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "The DEV pipeline has failed. Please investigate."}
+                      ]
+                    },
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {"type": "text", "text": "Workflow Run: "},
+                        {"type": "text", "text": "'"${RUN_URL}"'", "marks": [{"type": "link", "attrs": {"href": "'"${RUN_URL}"'"}}]}
+                      ]
+                    }
+                  ]
+                },
+                "issuetype": {"name": "Bug"},
+                "priority": {"name": "High"},
+                "labels": ["pipeline-failure", "voting01", "dev", "auto-created"]
+              }
+            }')
+
+          ISSUE_KEY=$(echo "$RESPONSE" | jq -r '.key // "FAILED"')
+          if [ "$ISSUE_KEY" != "FAILED" ] && [ "$ISSUE_KEY" != "null" ]; then
+            echo "✅ Created Jira ticket: ${ISSUE_KEY}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ═══════════════════════════════════════════════════════════════════════════════
   # GENERATE REPORT
   # ═══════════════════════════════════════════════════════════════════════════════
 
   generate-report:
     name: "📊 Generate Report"
-    needs: [collect-data, collect-metrics]
+    needs: [collect-data, collect-metrics, collect-workflow-status]
     runs-on: ubuntu-latest
     steps:
       - name: Report Header
@@ -161,6 +286,86 @@ jobs:
             echo "> ⚠️ **ENVIRONMENTS OUT OF SYNC** - Review versions below" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Last Deploy Status
+        env:
+          DEV_STATUS: ${{ needs.collect-workflow-status.outputs.dev_status }}
+          DEV_JOBS: ${{ needs.collect-workflow-status.outputs.dev_jobs }}
+          DEV_RUN_ID: ${{ needs.collect-workflow-status.outputs.dev_run_id }}
+          REPO_URL: https://github.com/${{ env.GITHUB_REPO }}
+        run: |
+          echo "## 🚦 Last DEV Deploy Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -z "$DEV_JOBS" ] || [ "$DEV_STATUS" = "unknown" ]; then
+            echo "> ℹ️ No recent deployment data available" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          else
+            # Status icon
+            if [ "$DEV_STATUS" = "success" ]; then
+              echo "> ✅ **Pipeline Succeeded** - [View Run](${REPO_URL}/actions/runs/${DEV_RUN_ID})" >> $GITHUB_STEP_SUMMARY
+            elif [ "$DEV_STATUS" = "failure" ]; then
+              echo "> ❌ **Pipeline Failed** - [View Run](${REPO_URL}/actions/runs/${DEV_RUN_ID})" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "> ⚠️ **Pipeline ${DEV_STATUS}** - [View Run](${REPO_URL}/actions/runs/${DEV_RUN_ID})" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Decode and parse jobs
+            JOBS_JSON=$(echo "$DEV_JOBS" | base64 -d 2>/dev/null || echo "[]")
+
+            # Generate visual pipeline
+            cat << 'MERMAID' >> $GITHUB_STEP_SUMMARY
+          ```mermaid
+          flowchart LR
+              subgraph SCAN["Security & Quality"]
+                  SEC["🔒 Security Scan"]
+                  SONAR["📊 SonarQube"]
+              end
+              BUILD["🏗️ Build & Push"]
+              DEPLOY["🚀 Deploy"]
+              subgraph NOTIFY["Post-Deploy"]
+                  JIRA_SEC["🔒 Jira Security"]
+                  JIRA["📋 Jira Issue"]
+                  SLACK["📢 Slack"]
+              end
+
+              SCAN --> BUILD --> DEPLOY --> NOTIFY
+          ```
+          MERMAID
+
+            # Job status table
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Job | Status | Duration |" >> $GITHUB_STEP_SUMMARY
+            echo "|-----|--------|----------|" >> $GITHUB_STEP_SUMMARY
+
+            echo "$JOBS_JSON" | jq -r '.[] | "\(.name)|\(.status)|\(.duration)"' 2>/dev/null | while IFS='|' read -r name status duration; do
+              # Format duration
+              if [ -n "$duration" ] && [ "$duration" != "null" ]; then
+                if [ "$duration" -ge 60 ]; then
+                  mins=$((duration / 60))
+                  secs=$((duration % 60))
+                  dur_str="${mins}m ${secs}s"
+                else
+                  dur_str="${duration}s"
+                fi
+              else
+                dur_str="-"
+              fi
+
+              # Status icon
+              case "$status" in
+                success) icon="✅" ;;
+                failure) icon="❌" ;;
+                skipped) icon="⏭️" ;;
+                *) icon="⚪" ;;
+              esac
+
+              echo "| ${name} | ${icon} ${status} | ${dur_str} |" >> $GITHUB_STEP_SUMMARY
+            done
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Application Architecture
         env:
