@@ -81,10 +81,10 @@ patches:
 images:
   - name: PLACEHOLDER_VOTE_IMAGE
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/voting01-vote
-    newTag: 0e07861-20260204053326
+    newTag: 3361b8f-20260204200102
   - name: PLACEHOLDER_RESULT_IMAGE
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/voting01-result
-    newTag: 0e07861-20260204053326
+    newTag: 3361b8f-20260204200102
   - name: PLACEHOLDER_WORKER_IMAGE
     newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/voting01-worker
-    newTag: 0e07861-20260204053326
+    newTag: 3361b8f-20260204200102
