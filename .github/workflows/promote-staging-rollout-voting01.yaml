@@ -1,0 +1,134 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# PROMOTE STAGING ROLLOUT - voting01
+# Manual promotion of blue-green preview to active after testing
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "🚀 Promote Staging (voting01)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "promote" to confirm'
+        required: true
+        type: string
+
+env:
+  APP_NAME: voting01
+  ENVIRONMENT: staging
+  AWS_REGION: us-west-2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    name: "🚀 Promote Preview to Active"
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'promote'
+    steps:
+      - name: Validate Confirmation
+        if: github.event.inputs.confirm != 'promote'
+        run: |
+          echo "❌ You must type 'promote' to confirm"
+          exit 1
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Argo Rollouts Plugin
+        run: |
+          curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x kubectl-argo-rollouts-linux-amd64
+          sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+      - name: Get Current Status
+        id: status
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+          echo "### 📊 Pre-Promotion Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Get rollout status
+          PHASE=$(kubectl get rollout vote -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -o jsonpath='{.status.phase}')
+          ACTIVE=$(kubectl get rollout vote -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -o jsonpath='{.status.blueGreen.activeSelector}')
+          PREVIEW=$(kubectl get rollout vote -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -o jsonpath='{.status.blueGreen.previewSelector}')
+
+          echo "| Status | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Phase | $PHASE |" >> $GITHUB_STEP_SUMMARY
+          echo "| Active Version | $ACTIVE |" >> $GITHUB_STEP_SUMMARY
+          echo "| Preview Version | $PREVIEW |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$PHASE" != "Paused" ]; then
+            echo "⚠️ Rollout is not paused (Phase: $PHASE). Nothing to promote." >> $GITHUB_STEP_SUMMARY
+            echo "paused=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Rollout is paused and ready for promotion" >> $GITHUB_STEP_SUMMARY
+            echo "paused=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Promote Rollout
+        if: steps.status.outputs.paused == 'true'
+        run: |
+          echo "### 🚀 Promoting Preview to Active" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          kubectl-argo-rollouts promote vote -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}
+
+          echo "✅ Promotion command sent" >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait for Promotion
+        if: steps.status.outputs.paused == 'true'
+        run: |
+          echo "Waiting for rollout to complete..."
+          kubectl-argo-rollouts status vote -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} --timeout 120s || true
+
+      - name: Post-Promotion Status
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Post-Promotion Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          PHASE=$(kubectl get rollout vote -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -o jsonpath='{.status.phase}')
+          ACTIVE=$(kubectl get rollout vote -n ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -o jsonpath='{.status.blueGreen.activeSelector}')
+
+          echo "| Status | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Phase | $PHASE |" >> $GITHUB_STEP_SUMMARY
+          echo "| Active Version | $ACTIVE |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$PHASE" == "Healthy" ]; then
+            echo "### ✅ Promotion Complete!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⏳ Promotion in progress (Phase: $PHASE)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Links" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Active** | [vote-voting01-staging.agent.opsera.dev](https://vote-voting01-staging.agent.opsera.dev) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Preview** | [vote-voting01-staging-preview.agent.opsera.dev](https://vote-voting01-staging-preview.agent.opsera.dev) |" >> $GITHUB_STEP_SUMMARY
+
+  rejected:
+    name: "❌ Promotion Rejected"
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm != 'promote'
+    steps:
+      - name: Show Rejection
+        run: |
+          echo "### ❌ Promotion Rejected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "You entered: \`${{ github.event.inputs.confirm }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To promote, you must type \`promote\` in the confirmation field." >> $GITHUB_STEP_SUMMARY

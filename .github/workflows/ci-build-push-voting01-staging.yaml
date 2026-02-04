@@ -100,37 +100,63 @@ jobs:
           NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
 
           echo "### 📊 Blue-Green Rollout Progress" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-          for i in {1..60}; do
+          for i in {1..40}; do
             VOTE_STATUS=$(kubectl get rollout vote -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
             RESULT_STATUS=$(kubectl get rollout result -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
             WORKER_STATUS=$(kubectl get rollout worker -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
 
-            # Check preview replicas
-            VOTE_PREVIEW=$(kubectl get rollout vote -n $NS -o jsonpath='{.status.blueGreen.previewReplicas}' 2>/dev/null || echo "0")
-            RESULT_PREVIEW=$(kubectl get rollout result -n $NS -o jsonpath='{.status.blueGreen.previewReplicas}' 2>/dev/null || echo "0")
+            echo "Vote: ${VOTE_STATUS}, Result: ${RESULT_STATUS}, Worker: ${WORKER_STATUS}"
 
-            echo "Vote: ${VOTE_STATUS} (preview: ${VOTE_PREVIEW}), Result: ${RESULT_STATUS} (preview: ${RESULT_PREVIEW}), Worker: ${WORKER_STATUS}"
+            # Success: All paused (waiting for manual promotion) or healthy
+            if [ "$VOTE_STATUS" = "Paused" ] && [ "$RESULT_STATUS" = "Paused" ] && [ "$WORKER_STATUS" = "Paused" ]; then
+              echo "### ✅ Preview Ready for Testing!" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
+              echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+              echo "| Vote | 🟡 Paused (awaiting promotion) |" >> $GITHUB_STEP_SUMMARY
+              echo "| Result | 🟡 Paused (awaiting promotion) |" >> $GITHUB_STEP_SUMMARY
+              echo "| Worker | 🟡 Paused (awaiting promotion) |" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### 🔗 Test the Preview" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| App | Preview URL (New Version) | Active URL (Current) |" >> $GITHUB_STEP_SUMMARY
+              echo "|-----|---------------------------|----------------------|" >> $GITHUB_STEP_SUMMARY
+              echo "| Vote | [Preview](https://vote-voting01-staging-preview.agent.opsera.dev) | [Active](https://vote-voting01-staging.agent.opsera.dev) |" >> $GITHUB_STEP_SUMMARY
+              echo "| Result | [Preview](https://result-voting01-staging-preview.agent.opsera.dev) | [Active](https://result-voting01-staging.agent.opsera.dev) |" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### 🚀 Next Step: Promote to Active" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "After testing the preview, promote to active:" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "[![Promote to Active](https://img.shields.io/badge/🚀_Promote_to_Active-Click_Here-success?style=for-the-badge)](${{ github.server_url }}/${{ github.repository }}/actions/workflows/promote-staging-rollout-voting01.yaml)" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "success=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
 
             if [ "$VOTE_STATUS" = "Healthy" ] && [ "$RESULT_STATUS" = "Healthy" ] && [ "$WORKER_STATUS" = "Healthy" ]; then
-              echo "✅ All rollouts healthy!" >> $GITHUB_STEP_SUMMARY
-              echo "- Active Vote: https://vote-voting01-staging.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
-              echo "- Active Result: https://result-voting01-staging.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
-              echo "- Preview Vote: https://vote-voting01-staging-preview.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
-              echo "- Preview Result: https://result-voting01-staging-preview.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "### ✅ All Services Promoted & Healthy!" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| App | URL |" >> $GITHUB_STEP_SUMMARY
+              echo "|-----|-----|" >> $GITHUB_STEP_SUMMARY
+              echo "| Vote | [vote-voting01-staging.agent.opsera.dev](https://vote-voting01-staging.agent.opsera.dev) |" >> $GITHUB_STEP_SUMMARY
+              echo "| Result | [result-voting01-staging.agent.opsera.dev](https://result-voting01-staging.agent.opsera.dev) |" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
               echo "success=true" >> $GITHUB_OUTPUT
               exit 0
             fi
 
             if [ "$VOTE_STATUS" = "Degraded" ] || [ "$RESULT_STATUS" = "Degraded" ] || [ "$WORKER_STATUS" = "Degraded" ]; then
-              echo "❌ Rollout degraded!" >> $GITHUB_STEP_SUMMARY
+              echo "### ❌ Rollout Degraded!" >> $GITHUB_STEP_SUMMARY
               echo "success=false" >> $GITHUB_OUTPUT
               exit 1
             fi
 
             sleep 15
           done
-          echo "⏱️ Rollout timeout" >> $GITHUB_STEP_SUMMARY
+          echo "### ⏱️ Rollout Timeout" >> $GITHUB_STEP_SUMMARY
           echo "success=false" >> $GITHUB_OUTPUT
 
   # ═══════════════════════════════════════════════════════════════════════════════
