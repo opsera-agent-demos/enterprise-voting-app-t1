@@ -196,6 +196,7 @@ jobs:
         with:
           payload: |
             {
+              "text": "⬆️ Promotion Triggered: voting01 (${{ github.event.inputs.source_environment }} → ${{ github.event.inputs.target_environment }})",
               "blocks": [
                 {
                   "type": "header",
