@@ -10,11 +10,11 @@
 <!-- DEPLOYMENT-STATUS:START - Auto-updated by landscape workflow -->
 | Environment | App | Last Deploy | Owner | Recent Deployments |
 |-------------|-----|-------------|-------|-------------------|
-| 🔧 **DEV** | [Vote](https://vote-voting01-dev.agent.opsera.dev) / [Result](https://result-voting01-dev.agent.opsera.dev) | 1 min ago | Sai Manasa G | • `7f1da79-2026` (1 min ago)<br>• `0961c14-2026` (24 mins ago)<br>• `5289e44-2026` (31 mins ago)<br>• `c852b04-2026` (41 mins ago)<br>• `ea6c479-2026` (52 mins ago) |
-| 🧪 **QA** | [Vote](https://vote-voting01-qa.agent.opsera.dev) / [Result](https://result-voting01-qa.agent.opsera.dev) | 20 mins ago | srinivas-source | • `0961c14-2026` (20 mins ago)<br>• `bebfee0-2026` (16h 12m ago)<br>• `364ac1a-2026` (16h 29m ago)<br>• `1cb6f68-2026` (16h 43m ago)<br>• `b80045f-2026` (17 hrs ago) |
-| 🎭 **Staging** | [Vote](https://vote-voting01-staging.agent.opsera.dev) / [Result](https://result-voting01-staging.agent.opsera.dev) | 4 mins ago | srinivas-source | • `0961c14-2026` (4 mins ago)<br>• `bebfee0-2026` (16h 12m ago)<br>• `364ac1a-2026` (16h 13m ago)<br>• `1cb6f68-2026` (16h 31m ago)<br>• `00178af-2026` (17h 5m ago) |
+| 🔧 **DEV** | [Vote](https://vote-voting01-dev.agent.opsera.dev) / [Result](https://result-voting01-dev.agent.opsera.dev) | 2 mins ago | srinivas-source | • `c8886cd-2026` (2 mins ago)<br>• `7745d6f-2026` (14 mins ago)<br>• `7f1da79-2026` (20 mins ago)<br>• `0961c14-2026` (43 mins ago)<br>• `5289e44-2026` (50 mins ago) |
+| 🧪 **QA** | [Vote](https://vote-voting01-qa.agent.opsera.dev) / [Result](https://result-voting01-qa.agent.opsera.dev) | 10 mins ago | srinivas-source | • `7745d6f-2026` (10 mins ago)<br>• `7f1da79-2026` (15 mins ago)<br>• `0961c14-2026` (39 mins ago)<br>• `bebfee0-2026` (16h 31m ago)<br>• `364ac1a-2026` (16h 48m ago) |
+| 🎭 **Staging** | [Vote](https://vote-voting01-staging.agent.opsera.dev) / [Result](https://result-voting01-staging.agent.opsera.dev) | 9 mins ago | srinivas-source | • `7745d6f-2026` (9 mins ago)<br>• `0961c14-2026` (23 mins ago)<br>• `bebfee0-2026` (16h 31m ago)<br>• `364ac1a-2026` (16h 32m ago)<br>• `1cb6f68-2026` (16h 50m ago) |
 
-> 📅 _Last updated: 2026-02-04 00:31 UTC_ | [🔄 Refresh](https://github.com/opsera-agentic/enterprise-voting-demo-only/actions/workflows/deployment-landscape-voting01.yaml)
+> 📅 _Last updated: 2026-02-04 00:50 UTC_ | [🔄 Refresh](https://github.com/opsera-agentic/enterprise-voting-demo-only/actions/workflows/deployment-landscape-voting01.yaml)
 <!-- DEPLOYMENT-STATUS:END -->
 
 ### Quick Actions
