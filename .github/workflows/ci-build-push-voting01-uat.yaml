@@ -1,0 +1,221 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# CI BUILD & DEPLOY - voting01 UAT (Canary)
+# MANUAL GATE: Requires manual trigger from GitHub Actions UI
+# Progressive rollout: 20% → 50% → 100% with New Relic analysis
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "🚀 Promote to UAT"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag from QA (check QA kustomization.yaml)'
+        required: true
+        type: string
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['github-hosted', 'self-hosted']
+        default: 'github-hosted'
+
+env:
+  APP_NAME: voting01
+  ENVIRONMENT: uat
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # GET IMAGE TAG
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  get-tag:
+    name: "🏷️ Validate Image Tag"
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Image Tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$TAG" ]; then
+            echo "❌ Error: Image tag is required"
+            exit 1
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          echo "### 🚀 Promoting to UAT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tag | \`$TAG\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered By | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Source | Manual Promotion |" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DEPLOY TO UAT (CANARY)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  deploy:
+    name: "🚀 Deploy UAT (Canary)"
+    needs: [get-tag]
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    outputs:
+      success: ${{ steps.verify.outputs.success }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Update Kustomization
+        run: |
+          cd .opsera-voting01/k8s/overlays/${{ env.ENVIRONMENT }}
+          sed -i "s|newTag:.*|newTag: ${{ needs.get-tag.outputs.image_tag }}|g" kustomization.yaml
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .opsera-voting01/
+          git diff --cached --quiet || git commit -m "deploy(voting01-uat): ${{ needs.get-tag.outputs.image_tag }} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup New Relic Secret
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+        run: |
+          if [ -z "$NEW_RELIC_LICENSE_KEY" ]; then
+            echo "⚠️ NEW_RELIC_LICENSE_KEY not configured - skipping New Relic setup" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+
+          # Create namespace if it doesn't exist
+          kubectl get namespace $NS || kubectl create namespace $NS
+
+          # Create or update the New Relic license secret
+          kubectl create secret generic newrelic-license \
+            --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
+            --namespace=$NS \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          echo "✅ New Relic secret configured for $NS" >> $GITHUB_STEP_SUMMARY
+
+      - name: Trigger ArgoCD Sync
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl annotate application ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -n argocd argocd.argoproj.io/refresh=hard --overwrite
+
+      - name: Verify Canary Rollout
+        id: verify
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+
+          echo "### 📊 Canary Rollout Progress" >> $GITHUB_STEP_SUMMARY
+
+          for i in {1..60}; do
+            # Check rollout status using kubectl argo rollouts
+            VOTE_STATUS=$(kubectl get rollout vote -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
+            RESULT_STATUS=$(kubectl get rollout result -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
+            WORKER_STATUS=$(kubectl get rollout worker -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Progressing")
+
+            echo "Vote: ${VOTE_STATUS}, Result: ${RESULT_STATUS}, Worker: ${WORKER_STATUS}"
+
+            if [ "$VOTE_STATUS" = "Healthy" ] && [ "$RESULT_STATUS" = "Healthy" ] && [ "$WORKER_STATUS" = "Healthy" ]; then
+              echo "✅ All rollouts healthy!" >> $GITHUB_STEP_SUMMARY
+              echo "- Vote: https://vote-voting01-uat.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "- Result: https://result-voting01-uat.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "success=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            if [ "$VOTE_STATUS" = "Degraded" ] || [ "$RESULT_STATUS" = "Degraded" ] || [ "$WORKER_STATUS" = "Degraded" ]; then
+              echo "❌ Rollout degraded!" >> $GITHUB_STEP_SUMMARY
+              echo "success=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+
+            sleep 15
+          done
+          echo "⏱️ Rollout timeout" >> $GITHUB_STEP_SUMMARY
+          echo "success=false" >> $GITHUB_OUTPUT
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # NOTIFICATIONS
+  # Note: Staging promotion is MANUAL - use "Promote to Staging" workflow
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  notify-slack:
+    name: "📢 Slack"
+    needs: [get-tag, deploy]
+    if: always()
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - name: Determine Status
+        id: status
+        run: |
+          if [ "${{ needs.deploy.outputs.success }}" = "true" ]; then
+            echo "emoji=✅" >> $GITHUB_OUTPUT
+            echo "title=UAT Canary Succeeded" >> $GITHUB_OUTPUT
+          else
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+            echo "title=UAT Canary Failed" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack Notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "${{ steps.status.outputs.emoji }} ${{ steps.status.outputs.title }} - voting01-uat",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ steps.status.outputs.emoji }} ${{ steps.status.outputs.title }}",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*App:*\n`voting01`"},
+                    {"type": "mrkdwn", "text": "*Environment:*\n`UAT (Canary)`"},
+                    {"type": "mrkdwn", "text": "*Tag:*\n`${{ needs.get-tag.outputs.image_tag }}`"},
+                    {"type": "mrkdwn", "text": "*Triggered by:*\n${{ github.actor }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [{
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "View Workflow"},
+                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,291 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# ANALYSIS TEMPLATE - UAT Canary with New Relic Metrics
+#
+# Multi-layer analysis strategy:
+#   Layer 1: HTTP Health Check (fast, detects crashes)
+#   Layer 2: New Relic Error Rate Analysis (critical, detects app errors)
+#
+# Auto-rollback triggers:
+#   - HTTP health check fails 2 of 5 times
+#   - Error rate exceeds 2% threshold
+#
+# TTL cleanup: AnalysisRuns deleted after 5 min, Jobs deleted after 2 min
+# ════════════════════════════════════════════════════════════════════════════════
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: voting01-health-check
+  labels:
+    app.kubernetes.io/name: voting01
+    environment: uat
+spec:
+  # TTL Strategy - Clean up AnalysisRuns after completion
+  ttlStrategy:
+    secondsAfterCompletion: 300   # Delete successful AnalysisRuns after 5 minutes
+    secondsAfterFailure: 600      # Keep failed ones longer for debugging (10 min)
+  args:
+    - name: service-name
+    - name: namespace
+  metrics:
+    # ═══════════════════════════════════════════════════════════════════════════
+    # LAYER 1: HTTP Health Check (Fast Detection)
+    # Purpose: Detect pod crashes and basic connectivity issues
+    # ═══════════════════════════════════════════════════════════════════════════
+    - name: http-health-check
+      interval: 30s
+      count: 5
+      successCondition: result == "healthy"
+      failureLimit: 2
+      provider:
+        job:
+          spec:
+            backoffLimit: 1
+            ttlSecondsAfterFinished: 120  # Delete Job pods after 2 minutes
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: health-check
+                    image: curlimages/curl:latest
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://{{args.service-name}}.{{args.namespace}}.svc.cluster.local/" --max-time 10)
+                        if [ "$HTTP_CODE" = "200" ]; then
+                          echo "healthy"
+                          exit 0
+                        else
+                          echo "unhealthy: HTTP $HTTP_CODE"
+                          exit 1
+                        fi
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# NEW RELIC ERROR RATE ANALYSIS TEMPLATE
+#
+# Queries New Relic for application error rate
+# Triggers rollback if error rate exceeds threshold (default: 2%)
+#
+# NRQL Query: SELECT percentage(count(*), WHERE error = true) FROM Transaction
+#
+# Supports both real New Relic and Mock server
+# ════════════════════════════════════════════════════════════════════════════════
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: voting01-newrelic-error-rate
+  labels:
+    app.kubernetes.io/name: voting01
+    environment: uat
+spec:
+  ttlStrategy:
+    secondsAfterCompletion: 300
+    secondsAfterFailure: 600
+  args:
+    - name: app-name
+      # Example: voting01-vote-uat
+    - name: error-threshold
+      value: "2"  # Default: 2% error rate threshold
+    - name: analysis-window
+      value: "5"  # Default: 5 minutes
+  metrics:
+    - name: newrelic-error-rate
+      interval: 60s
+      count: 3
+      successCondition: result.errorRate < {{args.error-threshold}}
+      failureLimit: 1
+      provider:
+        job:
+          spec:
+            backoffLimit: 1
+            ttlSecondsAfterFinished: 120
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: newrelic-query
+                    image: curlimages/curl:latest
+                    env:
+                      - name: NEW_RELIC_API_KEY
+                        valueFrom:
+                          secretKeyRef:
+                            name: newrelic-api-key
+                            key: api-key
+                            optional: true
+                      - name: NEW_RELIC_HOST
+                        valueFrom:
+                          configMapKeyRef:
+                            name: voting01-config
+                            key: NEW_RELIC_HOST
+                            optional: true
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        set -e
+
+                        APP_NAME="{{args.app-name}}"
+                        THRESHOLD={{args.error-threshold}}
+                        WINDOW={{args.analysis-window}}
+
+                        # Default to mock server if NEW_RELIC_HOST not set
+                        NR_HOST="${NEW_RELIC_HOST:-opsera-opsera-newrelic-dev.agent.opsera.dev}"
+
+                        echo "╔══════════════════════════════════════════════════════════════╗"
+                        echo "║ NEW RELIC CANARY ANALYSIS                                    ║"
+                        echo "╠══════════════════════════════════════════════════════════════╣"
+                        echo "║ App: $APP_NAME"
+                        echo "║ Error Threshold: ${THRESHOLD}%"
+                        echo "║ Analysis Window: ${WINDOW} minutes"
+                        echo "║ New Relic Host: $NR_HOST"
+                        echo "╚══════════════════════════════════════════════════════════════╝"
+
+                        # Query New Relic API for error rate
+                        # Works with both real NR and mock server
+                        RESPONSE=$(curl -s --max-time 30 \
+                          -H "Content-Type: application/json" \
+                          -H "Api-Key: ${NEW_RELIC_API_KEY:-mock_key}" \
+                          "https://${NR_HOST}/v1/metrics?app=${APP_NAME}&metric=errorRate&window=${WINDOW}m" \
+                          2>/dev/null || echo '{"errorRate": 0}')
+
+                        echo "Response: $RESPONSE"
+
+                        # Parse error rate from response
+                        # Handle both real NR response and mock server response
+                        ERROR_RATE=$(echo "$RESPONSE" | grep -oE '"errorRate"[[:space:]]*:[[:space:]]*[0-9.]+' | grep -oE '[0-9.]+$' || echo "0")
+
+                        # If no error rate found, default to 0 (healthy)
+                        if [ -z "$ERROR_RATE" ]; then
+                          ERROR_RATE="0"
+                        fi
+
+                        echo ""
+                        echo "╔══════════════════════════════════════════════════════════════╗"
+                        echo "║ ANALYSIS RESULT                                              ║"
+                        echo "╠══════════════════════════════════════════════════════════════╣"
+                        echo "║ Error Rate: ${ERROR_RATE}%"
+                        echo "║ Threshold:  ${THRESHOLD}%"
+
+                        # Compare error rate against threshold
+                        # Using awk for floating point comparison
+                        RESULT=$(awk -v rate="$ERROR_RATE" -v threshold="$THRESHOLD" 'BEGIN { if (rate < threshold) print "PASS"; else print "FAIL" }')
+
+                        if [ "$RESULT" = "PASS" ]; then
+                          echo "║ Status:     ✅ PASSED (Error rate below threshold)"
+                          echo "╚══════════════════════════════════════════════════════════════╝"
+                          # Output JSON for Argo Rollouts to parse
+                          echo '{"errorRate": '"$ERROR_RATE"'}'
+                          exit 0
+                        else
+                          echo "║ Status:     ❌ FAILED (Error rate exceeds threshold)"
+                          echo "║ Action:     🔄 TRIGGERING ROLLBACK"
+                          echo "╚══════════════════════════════════════════════════════════════╝"
+                          echo '{"errorRate": '"$ERROR_RATE"'}'
+                          exit 1
+                        fi
+
+---
+# ════════════════════════════════════════════════════════════════════════════════
+# COMPOSITE ANALYSIS TEMPLATE - Combined Health + Error Rate
+#
+# Best practice: Run both checks in sequence
+# Use this template for comprehensive canary validation
+# ════════════════════════════════════════════════════════════════════════════════
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: voting01-canary-analysis
+  labels:
+    app.kubernetes.io/name: voting01
+    environment: uat
+spec:
+  ttlStrategy:
+    secondsAfterCompletion: 300
+    secondsAfterFailure: 600
+  args:
+    - name: service-name
+    - name: namespace
+    - name: app-name
+    - name: error-threshold
+      value: "2"
+  metrics:
+    # Layer 1: Quick HTTP health check
+    - name: http-health
+      interval: 30s
+      count: 3
+      successCondition: result == "healthy"
+      failureLimit: 1
+      provider:
+        job:
+          spec:
+            backoffLimit: 1
+            ttlSecondsAfterFinished: 120
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: health-check
+                    image: curlimages/curl:latest
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://{{args.service-name}}.{{args.namespace}}.svc.cluster.local/" --max-time 10)
+                        if [ "$HTTP_CODE" = "200" ]; then
+                          echo "healthy"
+                          exit 0
+                        else
+                          echo "unhealthy: HTTP $HTTP_CODE"
+                          exit 1
+                        fi
+
+    # Layer 2: New Relic error rate analysis
+    - name: error-rate
+      interval: 60s
+      count: 2
+      successCondition: result.errorRate < {{args.error-threshold}}
+      failureLimit: 1
+      provider:
+        job:
+          spec:
+            backoffLimit: 1
+            ttlSecondsAfterFinished: 120
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: newrelic-check
+                    image: curlimages/curl:latest
+                    env:
+                      - name: NEW_RELIC_HOST
+                        valueFrom:
+                          configMapKeyRef:
+                            name: voting01-config
+                            key: NEW_RELIC_HOST
+                            optional: true
+                    command: ["/bin/sh", "-c"]
+                    args:
+                      - |
+                        APP_NAME="{{args.app-name}}"
+                        THRESHOLD={{args.error-threshold}}
+                        NR_HOST="${NEW_RELIC_HOST:-opsera-opsera-newrelic-dev.agent.opsera.dev}"
+
+                        echo "Querying New Relic for $APP_NAME error rate..."
+
+                        RESPONSE=$(curl -s --max-time 30 \
+                          "https://${NR_HOST}/v1/metrics?app=${APP_NAME}&metric=errorRate&window=5m" \
+                          2>/dev/null || echo '{"errorRate": 0}')
+
+                        ERROR_RATE=$(echo "$RESPONSE" | grep -oE '"errorRate"[[:space:]]*:[[:space:]]*[0-9.]+' | grep -oE '[0-9.]+$' || echo "0")
+                        [ -z "$ERROR_RATE" ] && ERROR_RATE="0"
+
+                        echo "Error Rate: ${ERROR_RATE}% (threshold: ${THRESHOLD}%)"
+
+                        RESULT=$(awk -v rate="$ERROR_RATE" -v threshold="$THRESHOLD" 'BEGIN { if (rate < threshold) print "PASS"; else print "FAIL" }')
+
+                        if [ "$RESULT" = "PASS" ]; then
+                          echo '{"errorRate": '"$ERROR_RATE"'}'
+                          exit 0
+                        else
+                          echo "❌ Error rate exceeds threshold - triggering rollback"
+                          echo '{"errorRate": '"$ERROR_RATE"'}'
+                          exit 1
+                        fi

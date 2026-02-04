@@ -1,0 +1,48 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: worker
+  labels:
+    app: worker
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2  # Keep only 2 old ReplicaSets to reduce pod count
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        app.kubernetes.io/name: worker
+    spec:
+      serviceAccountName: worker-sa
+      containers:
+        - name: worker
+          image: PLACEHOLDER_WORKER_IMAGE
+          env:
+            - name: NEW_RELIC_APP_NAME
+              value: "voting01-worker-uat"
+            - name: NEW_RELIC_ENVIRONMENT
+              value: "uat"
+          envFrom:
+            - configMapRef:
+                name: voting01-config
+            - secretRef:
+                name: newrelic-license
+                optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+  strategy:
+    canary:
+      steps:
+        - setWeight: 50
+        - pause: {duration: 2m}
+        - setWeight: 100

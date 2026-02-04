@@ -1,0 +1,112 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: result
+  labels:
+    app: result
+    app.kubernetes.io/name: result
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 2
+  revisionHistoryLimit: 2  # Keep only 2 old ReplicaSets to reduce pod count
+  selector:
+    matchLabels:
+      app: result
+  template:
+    metadata:
+      labels:
+        app: result
+        app.kubernetes.io/name: result
+    spec:
+      serviceAccountName: result-sa
+      containers:
+        - name: result
+          image: PLACEHOLDER_RESULT_IMAGE
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            - name: NEW_RELIC_APP_NAME
+              value: "voting01-result-uat"
+            - name: NEW_RELIC_ENVIRONMENT
+              value: "uat"
+          envFrom:
+            - configMapRef:
+                name: voting01-config
+            - secretRef:
+                name: newrelic-license
+                optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20
+  strategy:
+    canary:
+      canaryService: result-canary
+      stableService: result
+      trafficRouting:
+        nginx:
+          stableIngress: voting01-ingress
+      # ═══════════════════════════════════════════════════════════════════════════
+      # CANARY DEPLOYMENT STRATEGY WITH NEW RELIC ANALYSIS
+      # Auto-rollback if: Error rate > 2% OR health check fails
+      # ═══════════════════════════════════════════════════════════════════════════
+      steps:
+        # Phase 1: Initial canary (20% traffic)
+        - setWeight: 20
+        - pause: {duration: 2m}
+        - analysis:
+            templates:
+              - templateName: voting01-health-check
+            args:
+              - name: service-name
+                value: result-canary
+              - name: namespace
+                value: voting01-uat
+
+        # Phase 2: Expanded canary (50% traffic) with New Relic analysis
+        - setWeight: 50
+        - pause: {duration: 3m}
+        - analysis:
+            templates:
+              - templateName: voting01-canary-analysis
+            args:
+              - name: service-name
+                value: result-canary
+              - name: namespace
+                value: voting01-uat
+              - name: app-name
+                value: voting01-result-uat
+              - name: error-threshold
+                value: "2"
+
+        # Phase 3: Full rollout (100% traffic)
+        - setWeight: 100
+        - pause: {duration: 1m}
+        - analysis:
+            templates:
+              - templateName: voting01-canary-analysis
+            args:
+              - name: service-name
+                value: result-canary
+              - name: namespace
+                value: voting01-uat
+              - name: app-name
+                value: voting01-result-uat
+              - name: error-threshold
+                value: "2"

@@ -1,6 +1,6 @@
 # ════════════════════════════════════════════════════════════════════════════════
 # PROMOTION WORKFLOW - voting01
-# Manual/auto promotion between environments: DEV → QA → Staging
+# Manual/auto promotion between environments: DEV → QA → UAT → Staging
 # ════════════════════════════════════════════════════════════════════════════════
 
 name: "Promote (voting01)"
@@ -12,12 +12,12 @@ on:
         description: 'Source environment'
         required: true
         type: choice
-        options: ['dev', 'qa']
+        options: ['dev', 'qa', 'uat']
       target_environment:
         description: 'Target environment'
         required: true
         type: choice
-        options: ['qa', 'staging']
+        options: ['qa', 'uat', 'staging']
       image_tag:
         description: 'Image tag (leave empty to use current source tag)'
         required: false
@@ -56,17 +56,20 @@ jobs:
           SOURCE="${{ github.event.inputs.source_environment }}"
           TARGET="${{ github.event.inputs.target_environment }}"
 
-          # Valid paths: dev → qa, qa → staging
+          # Valid paths: dev → qa, qa → uat, uat → staging
           if [ "$SOURCE" = "dev" ] && [ "$TARGET" = "qa" ]; then
             echo "valid=true" >> $GITHUB_OUTPUT
             echo "✅ Valid promotion: DEV → QA" >> $GITHUB_STEP_SUMMARY
-          elif [ "$SOURCE" = "qa" ] && [ "$TARGET" = "staging" ]; then
+          elif [ "$SOURCE" = "qa" ] && [ "$TARGET" = "uat" ]; then
             echo "valid=true" >> $GITHUB_OUTPUT
-            echo "✅ Valid promotion: QA → Staging" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Valid promotion: QA → UAT" >> $GITHUB_STEP_SUMMARY
+          elif [ "$SOURCE" = "uat" ] && [ "$TARGET" = "staging" ]; then
+            echo "valid=true" >> $GITHUB_OUTPUT
+            echo "✅ Valid promotion: UAT → Staging" >> $GITHUB_STEP_SUMMARY
           else
             echo "valid=false" >> $GITHUB_OUTPUT
             echo "❌ Invalid promotion path: ${SOURCE} → ${TARGET}" >> $GITHUB_STEP_SUMMARY
-            echo "Valid paths: dev → qa, qa → staging" >> $GITHUB_STEP_SUMMARY
+            echo "Valid paths: dev → qa, qa → uat, uat → staging" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
@@ -153,9 +156,12 @@ jobs:
           github-token: ${{ secrets.GH_PAT }}
           script: |
             const target = '${{ github.event.inputs.target_environment }}';
-            const workflowFile = target === 'qa'
-              ? 'ci-build-push-voting01-qa.yaml'
-              : 'ci-build-push-voting01-staging.yaml';
+            const workflowMap = {
+              'qa': 'ci-build-push-voting01-qa.yaml',
+              'uat': 'ci-build-push-voting01-uat.yaml',
+              'staging': 'ci-build-push-voting01-staging.yaml'
+            };
+            const workflowFile = workflowMap[target];
 
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
