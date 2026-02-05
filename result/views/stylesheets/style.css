@@ -25,11 +25,11 @@ body{
 }
 
 #background-stats-1{
-  background-color: #FF6B00;
+  background-color: #4CAF50;
 }
 
 #background-stats-2{
-  background-color: #9C27B0;
+  background-color: #FFC107;
 }
 
 #content-container{
@@ -107,12 +107,12 @@ body{
 }
 
 #choice .choice.dogs{
-  color: #9C27B0;
+  color: #FFC107;
   float: right;
 }
 
 #choice .choice.cats{
-  color: #FF6B00;
+  color: #4CAF50;
   float: left;
 }
 #background-stats{
