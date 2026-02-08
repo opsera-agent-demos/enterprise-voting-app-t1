@@ -1,0 +1,105 @@
+# Fix IRSA: Delete pods to force recreation with updated ServiceAccount annotations
+name: "Fix IRSA Restart (voting01-dev9)"
+
+on:
+  workflow_dispatch:
+
+env:
+  APP_NAME: voting01
+  ENVIRONMENT: dev9
+  AWS_REGION: us-west-2
+  SPOKE_CLUSTER: opsera-usw2-np
+  HUB_CLUSTER: argocd-usw2
+
+jobs:
+  fix-irsa:
+    name: "Fix IRSA & Restart Pods"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify ServiceAccount Annotation (Hub)
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+          echo "### Current ServiceAccount Annotations" | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          for SA in vote-sa result-sa worker-sa; do
+            echo "--- $SA ---"
+            kubectl get sa $SA -n $NS -o jsonpath='{.metadata.annotations}' 2>&1
+            echo ""
+          done | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Force ArgoCD Hard Refresh
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl annotate application ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -n argocd argocd.argoproj.io/refresh=hard --overwrite
+          echo "ArgoCD hard refresh triggered" | tee -a $GITHUB_STEP_SUMMARY
+          sleep 15
+
+      - name: Wait for ArgoCD Sync
+        run: |
+          for i in {1..20}; do
+            STATUS=$(kubectl get application ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            echo "Sync: $STATUS"
+            [ "$STATUS" == "Synced" ] && break
+            sleep 5
+          done
+
+      - name: Delete Stale Pods
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+          echo "### Deleting Pods to Force Recreation" | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "Before deletion:"
+          kubectl get pods -n $NS -o wide 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo ""
+          # Delete all pods - deployments will recreate them with updated SA
+          kubectl delete pods --all -n $NS 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait for Pods to Start
+        run: |
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+          echo "### Waiting for pods to restart..." | tee -a $GITHUB_STEP_SUMMARY
+          sleep 30
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n $NS -o wide 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Verify New Pods IRSA
+        run: |
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+          echo "### New Pod IRSA Verification" | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          for POD in $(kubectl get pods -n $NS -o name 2>/dev/null); do
+            echo "--- $POD ---"
+            kubectl describe $POD -n $NS 2>&1 | grep -E "(AWS_ROLE_ARN|Service Account|Status:|State:)" || true
+            echo ""
+          done | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Pod Logs Check
+        run: |
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+          echo "### Result Pod Logs (post-restart)" | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl logs -n $NS -l app=result --tail=30 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo ""
+          echo "### Worker Pod Logs (post-restart)" | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl logs -n $NS -l app=worker --tail=30 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo ""
+          echo "### Vote Pod Logs (post-restart)" | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          kubectl logs -n $NS -l app=vote --tail=15 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
