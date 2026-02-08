@@ -1,0 +1,293 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# CI BUILD & DEPLOY - voting01 DEV9
+# Simplified workflow for dev9 environment
+# ════════════════════════════════════════════════════════════════════════════════
+
+name: "CI Build (voting01-dev9)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (leave empty to build new)'
+        required: false
+        type: string
+      security_scan_mode:
+        description: 'Security scan behavior'
+        type: choice
+        options: ['fail', 'warn', 'skip']
+        default: 'warn'
+      runner:
+        description: 'Runner type'
+        type: choice
+        options: ['github-hosted', 'self-hosted']
+        default: 'github-hosted'
+
+env:
+  APP_NAME: voting01
+  ENVIRONMENT: dev9
+  AWS_REGION: us-west-2
+  HUB_CLUSTER: argocd-usw2
+  SPOKE_CLUSTER: opsera-usw2-np
+
+permissions:
+  contents: write
+  security-events: write
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # SECURITY SCANNING
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  security-gitleaks:
+    name: "Security Scan"
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    if: github.event.inputs.security_scan_mode != 'skip'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Security Scan Status
+        run: |
+          echo "### Security Scan" >> $GITHUB_STEP_SUMMARY
+          echo "Security scanning configured" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Gitleaks requires a license for organization repos." >> $GITHUB_STEP_SUMMARY
+          echo "Container scanning (Grype) runs during the build stage." >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # BUILD & PUSH
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  build:
+    name: "Build & Push"
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    needs: [security-gitleaks]
+    if: always() && !contains(needs.*.result, 'failure') && github.event.inputs.image_tag == ''
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+      - name: Generate Tag
+        id: tag
+        run: |
+          TAG="$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M%S)"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "### Image Tag: \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Build & Push Vote
+        run: |
+          ECR="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/opsera/${{ env.APP_NAME }}-vote"
+          docker build -f .opsera-voting01/Dockerfiles/Dockerfile.vote -t ${ECR}:${{ steps.tag.outputs.tag }} .
+          docker push ${ECR}:${{ steps.tag.outputs.tag }}
+          echo "Vote pushed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Grype Scan Vote
+        if: github.event.inputs.security_scan_mode != 'skip'
+        uses: anchore/scan-action@v3
+        continue-on-error: true
+        with:
+          image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/opsera/${{ env.APP_NAME }}-vote:${{ steps.tag.outputs.tag }}
+          fail-build: ${{ github.event.inputs.security_scan_mode == 'fail' }}
+          severity-cutoff: high
+
+      - name: Build & Push Result
+        run: |
+          ECR="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/opsera/${{ env.APP_NAME }}-result"
+          docker build -f .opsera-voting01/Dockerfiles/Dockerfile.result -t ${ECR}:${{ steps.tag.outputs.tag }} .
+          docker push ${ECR}:${{ steps.tag.outputs.tag }}
+          echo "Result pushed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Grype Scan Result
+        if: github.event.inputs.security_scan_mode != 'skip'
+        uses: anchore/scan-action@v3
+        continue-on-error: true
+        with:
+          image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/opsera/${{ env.APP_NAME }}-result:${{ steps.tag.outputs.tag }}
+          fail-build: ${{ github.event.inputs.security_scan_mode == 'fail' }}
+          severity-cutoff: high
+
+      - name: Build & Push Worker
+        run: |
+          ECR="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/opsera/${{ env.APP_NAME }}-worker"
+          docker build -f .opsera-voting01/Dockerfiles/Dockerfile.worker -t ${ECR}:${{ steps.tag.outputs.tag }} .
+          docker push ${ECR}:${{ steps.tag.outputs.tag }}
+          echo "Worker pushed" >> $GITHUB_STEP_SUMMARY
+
+      - name: Grype Scan Worker
+        if: github.event.inputs.security_scan_mode != 'skip'
+        uses: anchore/scan-action@v3
+        continue-on-error: true
+        with:
+          image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/opsera/${{ env.APP_NAME }}-worker:${{ steps.tag.outputs.tag }}
+          fail-build: ${{ github.event.inputs.security_scan_mode == 'fail' }}
+          severity-cutoff: high
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DEPLOY
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  deploy:
+    name: "Deploy DEV9"
+    needs: [build]
+    if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    outputs:
+      success: ${{ steps.verify.outputs.success }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Determine Image Tag
+        id: image
+        run: |
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ needs.build.outputs.image_tag }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Kustomization
+        run: |
+          cd .opsera-voting01/k8s/overlays/${{ env.ENVIRONMENT }}
+          sed -i "s|newTag:.*|newTag: ${{ steps.image.outputs.tag }}|g" kustomization.yaml
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .opsera-voting01/
+          git diff --cached --quiet || git commit -m "deploy(voting01-dev9): ${{ steps.image.outputs.tag }} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup New Relic Secret
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+        run: |
+          if [ -z "$NEW_RELIC_LICENSE_KEY" ]; then
+            echo "NEW_RELIC_LICENSE_KEY not configured - skipping New Relic setup" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+
+          # Create namespace if it doesn't exist
+          kubectl get namespace $NS || kubectl create namespace $NS
+
+          # Create or update the New Relic license secret
+          kubectl create secret generic newrelic-license \
+            --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
+            --namespace=$NS \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          echo "New Relic secret configured for $NS" >> $GITHUB_STEP_SUMMARY
+
+      - name: Trigger ArgoCD Sync
+        run: |
+          aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
+          kubectl annotate application ${{ env.APP_NAME }}-${{ env.ENVIRONMENT }} -n argocd argocd.argoproj.io/refresh=hard --overwrite || true
+
+      - name: Verify Deployment
+        id: verify
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+
+          for i in {1..30}; do
+            VOTE=$(kubectl get deploy vote -n $NS -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            RESULT=$(kubectl get deploy result -n $NS -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            WORKER=$(kubectl get deploy worker -n $NS -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+
+            echo "Vote: ${VOTE:-0}, Result: ${RESULT:-0}, Worker: ${WORKER:-0}"
+
+            if [ "${VOTE:-0}" -ge 1 ] && [ "${RESULT:-0}" -ge 1 ] && [ "${WORKER:-0}" -ge 1 ]; then
+              echo "All services ready!" >> $GITHUB_STEP_SUMMARY
+              echo "- Vote: https://vote-voting01-dev9.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "- Result: https://result-voting01-dev9.agent.opsera.dev" >> $GITHUB_STEP_SUMMARY
+              echo "success=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "success=false" >> $GITHUB_OUTPUT
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # NOTIFICATIONS
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  notify-slack:
+    name: "Slack"
+    needs: [build, deploy]
+    if: always()
+    runs-on: ${{ github.event.inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "linux", "opsera"]') || 'ubuntu-latest' }}
+    steps:
+      - name: Send Slack Notification
+        if: env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "${{ needs.deploy.outputs.success == 'true' && 'DEV9 Deployment Succeeded' || 'DEV9 Deployment Failed' }} - voting01",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ needs.deploy.outputs.success == 'true' && 'DEV9 Deployment Succeeded' || 'DEV9 Deployment Failed' }}"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Application:*\n`voting01`"},
+                    {"type": "mrkdwn", "text": "*Environment:*\n`dev9`"},
+                    {"type": "mrkdwn", "text": "*Triggered By:*\n${{ github.actor }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View Workflow"},
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "Vote App"},
+                      "url": "https://vote-voting01-dev9.agent.opsera.dev"
+                    },
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "Result App"},
+                      "url": "https://result-voting01-dev9.agent.opsera.dev"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

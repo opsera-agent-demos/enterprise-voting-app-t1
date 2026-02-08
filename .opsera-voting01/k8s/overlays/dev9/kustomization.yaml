@@ -1,0 +1,49 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: voting01-dev9
+
+resources:
+  - ../../base
+  - configmap.yaml
+  - serviceaccounts.yaml
+
+commonLabels:
+  environment: dev9
+
+patches:
+  - target:
+      kind: Ingress
+      name: voting01-ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: vote-voting01-dev9.agent.opsera.dev
+      - op: replace
+        path: /spec/rules/1/host
+        value: result-voting01-dev9.agent.opsera.dev
+  - target:
+      kind: Deployment
+      name: vote
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: result
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+
+images:
+  - name: PLACEHOLDER_VOTE_IMAGE
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/voting01-vote
+    newTag: latest
+  - name: PLACEHOLDER_RESULT_IMAGE
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/voting01-result
+    newTag: latest
+  - name: PLACEHOLDER_WORKER_IMAGE
+    newName: 792373136340.dkr.ecr.us-west-2.amazonaws.com/opsera/voting01-worker
+    newTag: latest
