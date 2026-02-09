@@ -1,0 +1,154 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# Simulate Error Rate - voting01
+#
+# Sends traffic to the QA vote endpoint with a configurable % of requests
+# carrying the X-Simulate-Error header, producing 500s captured by New Relic.
+# Stateless - works reliably across all pods/workers.
+# ════════════════════════════════════════════════════════════════════════════════
+name: "Simulate Error Rate - voting01"
+
+on:
+  workflow_dispatch:
+    inputs:
+      error_rate:
+        description: "Error rate percentage (0-100)"
+        required: true
+        default: "30"
+        type: string
+      total_requests:
+        description: "Total number of requests to send"
+        required: true
+        default: "200"
+        type: string
+      delay_ms:
+        description: "Delay between requests in milliseconds"
+        required: true
+        default: "500"
+        type: string
+      environment:
+        description: "Target environment"
+        required: true
+        default: "qa"
+        type: choice
+        options:
+          - qa
+          - staging
+          - uat
+
+jobs:
+  simulate-errors:
+    name: "Send ${{ inputs.error_rate }}% error traffic to ${{ inputs.environment }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run error simulation
+        run: |
+          set -euo pipefail
+
+          # ── Configuration ──────────────────────────────────────────────
+          ENV="${{ inputs.environment }}"
+          BASE_URL="https://vote-voting01-${ENV}.agent.opsera.dev"
+          ERROR_RATE=${{ inputs.error_rate }}
+          TOTAL=${{ inputs.total_requests }}
+          DELAY_SEC=$(echo "scale=3; ${{ inputs.delay_ms }} / 1000" | bc)
+
+          echo "══════════════════════════════════════════════════════════"
+          echo "  Error Rate Simulation - voting01 ${ENV}"
+          echo "══════════════════════════════════════════════════════════"
+          echo "  Target:     ${BASE_URL}"
+          echo "  Error Rate: ${ERROR_RATE}%"
+          echo "  Requests:   ${TOTAL}"
+          echo "  Delay:      ${DELAY_SEC}s between requests"
+          echo "══════════════════════════════════════════════════════════"
+          echo ""
+
+          # ── Verify endpoint is reachable ────────────────────────────
+          echo "→ Checking endpoint health..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${BASE_URL}/health" || echo "000")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "✗ Health check failed (HTTP ${HTTP_CODE}). Is the ${ENV} environment running?"
+            exit 1
+          fi
+          echo "✓ Endpoint healthy"
+          echo ""
+
+          # ── Send traffic ────────────────────────────────────────────
+          ERRORS_SENT=0
+          NORMAL_SENT=0
+          HTTP_500=0
+          HTTP_200=0
+          HTTP_OTHER=0
+
+          for i in $(seq 1 "$TOTAL"); do
+            # Decide if this request should simulate an error
+            RAND=$((RANDOM % 100))
+
+            if [ "$RAND" -lt "$ERROR_RATE" ]; then
+              # ── Error request: include X-Simulate-Error header ──
+              CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+                -X POST \
+                -H "X-Simulate-Error: true" \
+                -d "vote=a" \
+                "${BASE_URL}/" 2>/dev/null || echo "000")
+              ERRORS_SENT=$((ERRORS_SENT + 1))
+              MARKER="ERR"
+            else
+              # ── Normal request ──
+              CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+                -X POST \
+                -d "vote=a" \
+                "${BASE_URL}/" 2>/dev/null || echo "000")
+              NORMAL_SENT=$((NORMAL_SENT + 1))
+              MARKER="OK "
+            fi
+
+            # Track response codes
+            if [ "$CODE" = "500" ]; then
+              HTTP_500=$((HTTP_500 + 1))
+            elif [ "$CODE" = "200" ]; then
+              HTTP_200=$((HTTP_200 + 1))
+            else
+              HTTP_OTHER=$((HTTP_OTHER + 1))
+            fi
+
+            # Progress log every 10 requests
+            if [ $((i % 10)) -eq 0 ] || [ "$i" -eq 1 ]; then
+              PCT=$((i * 100 / TOTAL))
+              echo "[${PCT}%] Request ${i}/${TOTAL} | ${MARKER} → HTTP ${CODE} | 500s so far: ${HTTP_500}"
+            fi
+
+            sleep "$DELAY_SEC"
+          done
+
+          # ── Results ─────────────────────────────────────────────────
+          ACTUAL_RATE=0
+          if [ "$TOTAL" -gt 0 ]; then
+            ACTUAL_RATE=$((HTTP_500 * 100 / TOTAL))
+          fi
+
+          echo ""
+          echo "══════════════════════════════════════════════════════════"
+          echo "  RESULTS"
+          echo "══════════════════════════════════════════════════════════"
+          echo "  Total requests:    ${TOTAL}"
+          echo "  Error requests:    ${ERRORS_SENT} (with X-Simulate-Error header)"
+          echo "  Normal requests:   ${NORMAL_SENT}"
+          echo "  ──────────────────────────────────────────────────────"
+          echo "  HTTP 200 (OK):     ${HTTP_200}"
+          echo "  HTTP 500 (Error):  ${HTTP_500}"
+          echo "  HTTP Other:        ${HTTP_OTHER}"
+          echo "  ──────────────────────────────────────────────────────"
+          echo "  Target error rate: ${ERROR_RATE}%"
+          echo "  Actual error rate: ${ACTUAL_RATE}%"
+          echo "══════════════════════════════════════════════════════════"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Error Rate Simulation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Error Rate | ${{ inputs.error_rate }}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Requests | ${{ inputs.total_requests }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Delay | ${{ inputs.delay_ms }}ms |" >> $GITHUB_STEP_SUMMARY

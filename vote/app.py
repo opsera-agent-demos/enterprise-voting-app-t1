@@ -6,8 +6,8 @@
 # ════════════════════════════════════════════════════════════════════════════════
 import os
 
-# Application version - E2E Integration Test v23
-APP_VERSION = "2026.02.04-v23"
+# Application version - Header-based error simulation v24
+APP_VERSION = "2026.02.08-v24"
 
 # Log New Relic configuration status at startup
 _nr_license = os.getenv('NEW_RELIC_LICENSE_KEY')
@@ -82,6 +82,11 @@ def hello():
     vote = None
 
     if request.method == 'POST':
+        # Header-based error injection (used by GHA error-rate simulation script)
+        if request.headers.get('X-Simulate-Error') == 'true':
+            app.logger.error('SIMULATED ERROR: triggered by X-Simulate-Error header')
+            raise Exception('Simulated Error: error rate simulation via GHA script')
+
         # If error simulation is ON, raise exception (captured by New Relic)
         if ERROR_SIM_ENABLED:
             app.logger.error('SIMULATED ERROR: Error simulation is ON')
