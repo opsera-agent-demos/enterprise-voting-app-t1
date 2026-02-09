@@ -33,10 +33,14 @@ jobs:
       dev_version: ${{ steps.versions.outputs.dev }}
       qa_version: ${{ steps.versions.outputs.qa }}
       staging_version: ${{ steps.versions.outputs.staging }}
+      uat_version: ${{ steps.versions.outputs.uat }}
+      mock1_version: ${{ steps.versions.outputs.mock1 }}
       in_sync: ${{ steps.versions.outputs.in_sync }}
       dev_history: ${{ steps.history.outputs.dev_history }}
       qa_history: ${{ steps.history.outputs.qa_history }}
       staging_history: ${{ steps.history.outputs.staging_history }}
+      uat_history: ${{ steps.history.outputs.uat_history }}
+      mock1_history: ${{ steps.history.outputs.mock1_history }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,10 +52,14 @@ jobs:
           DEV=$(grep -A2 'PLACEHOLDER_VOTE' .opsera-voting01/k8s/overlays/dev/kustomization.yaml | grep newTag | awk '{print $2}' || echo "unknown")
           QA=$(grep -A2 'PLACEHOLDER_VOTE' .opsera-voting01/k8s/overlays/qa/kustomization.yaml | grep newTag | awk '{print $2}' || echo "unknown")
           STAGING=$(grep -A2 'PLACEHOLDER_VOTE' .opsera-voting01/k8s/overlays/staging/kustomization.yaml | grep newTag | awk '{print $2}' || echo "unknown")
+          UAT=$(grep -A2 'PLACEHOLDER_VOTE' .opsera-voting01/k8s/overlays/uat/kustomization.yaml | grep newTag | awk '{print $2}' || echo "unknown")
+          MOCK1=$(grep -A2 'PLACEHOLDER_VOTE' .opsera-voting01/k8s/overlays/mock1/kustomization.yaml | grep newTag | awk '{print $2}' || echo "unknown")
 
           echo "dev=${DEV}" >> $GITHUB_OUTPUT
           echo "qa=${QA}" >> $GITHUB_OUTPUT
           echo "staging=${STAGING}" >> $GITHUB_OUTPUT
+          echo "uat=${UAT}" >> $GITHUB_OUTPUT
+          echo "mock1=${MOCK1}" >> $GITHUB_OUTPUT
 
           if [ "$DEV" == "$QA" ] && [ "$QA" == "$STAGING" ]; then
             echo "in_sync=true" >> $GITHUB_OUTPUT
@@ -98,10 +106,14 @@ jobs:
           DEV_HIST=$(get_history "dev")
           QA_HIST=$(get_history "qa")
           STAGING_HIST=$(get_history "staging")
+          UAT_HIST=$(get_history "uat")
+          MOCK1_HIST=$(get_history "mock1")
 
           echo "dev_history=${DEV_HIST}" >> $GITHUB_OUTPUT
           echo "qa_history=${QA_HIST}" >> $GITHUB_OUTPUT
           echo "staging_history=${STAGING_HIST}" >> $GITHUB_OUTPUT
+          echo "uat_history=${UAT_HIST}" >> $GITHUB_OUTPUT
+          echo "mock1_history=${MOCK1_HIST}" >> $GITHUB_OUTPUT
 
   # ═══════════════════════════════════════════════════════════════════════════════
   # COLLECT CLUSTER METRICS
@@ -114,9 +126,13 @@ jobs:
       dev_pods: ${{ steps.metrics.outputs.dev_pods }}
       qa_pods: ${{ steps.metrics.outputs.qa_pods }}
       staging_pods: ${{ steps.metrics.outputs.staging_pods }}
+      uat_pods: ${{ steps.metrics.outputs.uat_pods }}
+      mock1_pods: ${{ steps.metrics.outputs.mock1_pods }}
       dev_health: ${{ steps.metrics.outputs.dev_health }}
       qa_health: ${{ steps.metrics.outputs.qa_health }}
       staging_health: ${{ steps.metrics.outputs.staging_health }}
+      uat_health: ${{ steps.metrics.outputs.uat_health }}
+      mock1_health: ${{ steps.metrics.outputs.mock1_health }}
     steps:
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -130,7 +146,7 @@ jobs:
         run: |
           aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }} 2>/dev/null || true
 
-          for ENV in dev qa staging; do
+          for ENV in dev qa staging uat mock1; do
             NS="${{ env.APP_NAME }}-${ENV}"
             PODS=$(kubectl get pods -n $NS --no-headers 2>/dev/null | grep -c Running || echo "0")
             READY=$(kubectl get pods -n $NS --no-headers 2>/dev/null | grep -c "1/1\|2/2\|3/3" || echo "0")
@@ -205,6 +221,8 @@ jobs:
           get_workflow_status "ci-build-push-voting01-dev.yaml" "dev"
           get_workflow_status "ci-build-push-voting01-qa.yaml" "qa"
           get_workflow_status "ci-build-push-voting01-staging.yaml" "staging"
+          get_workflow_status "ci-build-push-voting01-uat.yaml" "uat"
+          get_workflow_status "ci-build-push-voting01-mock1.yaml" "mock1"
 
       - name: Create Jira Ticket on Failure
         if: steps.status.outputs.dev_has_failures == 'true'
@@ -288,15 +306,23 @@ jobs:
           DEV_HIST: ${{ needs.collect-data.outputs.dev_history }}
           QA_HIST: ${{ needs.collect-data.outputs.qa_history }}
           STG_HIST: ${{ needs.collect-data.outputs.staging_history }}
+          UAT_HIST: ${{ needs.collect-data.outputs.uat_history }}
+          MOCK1_HIST: ${{ needs.collect-data.outputs.mock1_history }}
           DEV_V: ${{ needs.collect-data.outputs.dev_version }}
           QA_V: ${{ needs.collect-data.outputs.qa_version }}
           STG_V: ${{ needs.collect-data.outputs.staging_version }}
+          UAT_V: ${{ needs.collect-data.outputs.uat_version }}
+          MOCK1_V: ${{ needs.collect-data.outputs.mock1_version }}
           DEV_H: ${{ needs.collect-metrics.outputs.dev_health }}
           QA_H: ${{ needs.collect-metrics.outputs.qa_health }}
           STG_H: ${{ needs.collect-metrics.outputs.staging_health }}
+          UAT_H: ${{ needs.collect-metrics.outputs.uat_health }}
+          MOCK1_H: ${{ needs.collect-metrics.outputs.mock1_health }}
           DEV_P: ${{ needs.collect-metrics.outputs.dev_pods }}
           QA_P: ${{ needs.collect-metrics.outputs.qa_pods }}
           STG_P: ${{ needs.collect-metrics.outputs.staging_pods }}
+          UAT_P: ${{ needs.collect-metrics.outputs.uat_pods }}
+          MOCK1_P: ${{ needs.collect-metrics.outputs.mock1_pods }}
           DEV_STATUS: ${{ needs.collect-workflow-status.outputs.dev_status }}
           DEV_RUN_ID: ${{ needs.collect-workflow-status.outputs.dev_run_id }}
           REPO_URL: https://github.com/${{ env.GITHUB_REPO }}
@@ -353,11 +379,13 @@ jobs:
           echo "| Environment | Version | Health | Pods | Last Deploy | Deployed By |" >> $GITHUB_STEP_SUMMARY
           echo "|-------------|---------|--------|------|-------------|-------------|" >> $GITHUB_STEP_SUMMARY
 
-          for ENV in DEV QA STAGING; do
+          for ENV in DEV QA STAGING UAT MOCK1; do
             case $ENV in
               DEV) HIST="$DEV_HIST"; VER="$DEV_V"; HEALTH="$DEV_H"; PODS="$DEV_P"; ICON="🔧" ;;
               QA) HIST="$QA_HIST"; VER="$QA_V"; HEALTH="$QA_H"; PODS="$QA_P"; ICON="🧪" ;;
               STAGING) HIST="$STG_HIST"; VER="$STG_V"; HEALTH="$STG_H"; PODS="$STG_P"; ICON="🎭" ;;
+              UAT) HIST="$UAT_HIST"; VER="$UAT_V"; HEALTH="$UAT_H"; PODS="$UAT_P"; ICON="🔬" ;;
+              MOCK1) HIST="$MOCK1_HIST"; VER="$MOCK1_V"; HEALTH="$MOCK1_H"; PODS="$MOCK1_P"; ICON="🧩" ;;
             esac
 
             LATEST=$(get_latest "$HIST")
@@ -527,6 +555,291 @@ jobs:
           echo "| ⚙️ Worker | .NET 7 | [worker/](${REPO_URL}/tree/main/worker) | [Dockerfile.worker](${REPO_URL}/blob/main/.opsera-voting01/Dockerfiles/Dockerfile.worker) | Background vote processor |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
+      - name: ArgoCD Architecture
+        env:
+          REPO_URL: https://github.com/${{ env.GITHUB_REPO }}
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          ## 🔄 ArgoCD GitOps Architecture
+
+          ### Hub-Spoke Cluster Topology
+
+          ```mermaid
+          flowchart TB
+              subgraph GITHUB["GitHub (Source of Truth)"]
+                  REPO["📦 enterprise-voting-demo-only<br/>Branch: main"]
+                  subgraph OVERLAYS["Kustomize Overlays"]
+                      O_DEV["overlays/dev/"]
+                      O_QA["overlays/qa/"]
+                      O_STG["overlays/staging/"]
+                      O_UAT["overlays/uat/"]
+                      O_MOCK1["overlays/mock1/"]
+                  end
+              end
+
+              subgraph HUB_CLUSTER["🎯 Hub Cluster: argocd-usw2"]
+                  ARGOCD["ArgoCD Server<br/>namespace: argocd"]
+                  subgraph ARGO_APPS["ArgoCD Applications"]
+                      APP_DEV["voting01-dev"]
+                      APP_QA["voting01-qa"]
+                      APP_STG["voting01-staging"]
+                      APP_UAT["voting01-uat"]
+                      APP_MOCK1["voting01-mock1"]
+                  end
+              end
+
+              subgraph SPOKE_CLUSTER["🎡 Spoke Cluster: opsera-usw2-np"]
+                  subgraph NS_DEV["voting01-dev"]
+                      DEV_VOTE["vote"] & DEV_RESULT["result"] & DEV_WORKER["worker"]
+                  end
+                  subgraph NS_QA["voting01-qa"]
+                      QA_VOTE["vote"] & QA_RESULT["result"] & QA_WORKER["worker"]
+                  end
+                  subgraph NS_STG["voting01-staging"]
+                      STG_VOTE["vote"] & STG_RESULT["result"] & STG_WORKER["worker"]
+                  end
+                  subgraph NS_UAT["voting01-uat"]
+                      UAT_VOTE["vote"] & UAT_RESULT["result"] & UAT_WORKER["worker"]
+                  end
+                  subgraph NS_MOCK1["voting01-mock1"]
+                      M1_VOTE["vote"] & M1_RESULT["result"] & M1_WORKER["worker"]
+                  end
+              end
+
+              REPO -->|"watch"| ARGOCD
+              APP_DEV -->|"sync"| NS_DEV
+              APP_QA -->|"sync"| NS_QA
+              APP_STG -->|"sync"| NS_STG
+              APP_UAT -->|"sync"| NS_UAT
+              APP_MOCK1 -->|"sync"| NS_MOCK1
+              O_DEV -.-> APP_DEV
+              O_QA -.-> APP_QA
+              O_STG -.-> APP_STG
+              O_UAT -.-> APP_UAT
+              O_MOCK1 -.-> APP_MOCK1
+          ```
+
+          ### ArgoCD GitOps Sync Flow
+
+          ```mermaid
+          sequenceDiagram
+              participant DEV as Developer
+              participant GH as GitHub
+              participant CI as GitHub Actions
+              participant ARGO as ArgoCD (Hub)
+              participant K8S as EKS Spoke
+
+              DEV->>GH: Push code to main
+              GH->>CI: Trigger CI workflow
+              CI->>CI: Build & scan images
+              CI->>CI: Push to ECR
+              CI->>GH: Update kustomization.yaml<br/>(newTag: sha-timestamp)
+              CI->>ARGO: kubectl annotate refresh=hard
+              ARGO->>GH: Detect manifest change
+              ARGO->>K8S: Apply via destination.name
+              K8S->>K8S: Rolling/Canary/Blue-Green update
+              ARGO->>ARGO: Health check & sync status
+          ```
+
+          ### ArgoCD Application Configuration
+
+          | Application | Namespace | Source Path | Destination Cluster | Sync Policy | Strategy |
+          |-------------|-----------|-------------|--------------------|-|----------|
+          | `voting01-dev` | `voting01-dev` | `.opsera-voting01/k8s/overlays/dev` | `opsera-usw2-np` | Auto (prune + selfHeal) | Rolling |
+          | `voting01-qa` | `voting01-qa` | `.opsera-voting01/k8s/overlays/qa` | `opsera-usw2-np` | Auto (prune + selfHeal) | Canary |
+          | `voting01-staging` | `voting01-staging` | `.opsera-voting01/k8s/overlays/staging` | `opsera-usw2-np` | Auto (prune + selfHeal) | Blue-Green |
+          | `voting01-uat` | `voting01-uat` | `.opsera-voting01/k8s/overlays/uat` | `opsera-usw2-np` | Auto (prune + selfHeal) | Canary |
+          | `voting01-mock1` | `voting01-mock1` | `.opsera-voting01/k8s/overlays/mock1` | `opsera-usw2-np` | Auto (prune + selfHeal) | Rolling |
+
+          > **Key Design Decision (RULE 59):** ArgoCD uses `destination.name: opsera-usw2-np` (not `destination.server`) for hub-spoke architecture. This references the cluster name registered in ArgoCD, enabling portable configurations.
+
+          ### ArgoCD Sync Options
+
+          | Option | Value | Purpose |
+          |--------|-------|---------|
+          | `automated.prune` | `true` | Remove orphaned resources |
+          | `automated.selfHeal` | `true` | Revert manual drift |
+          | `CreateNamespace` | `true` | Auto-create target namespace |
+          | `PrunePropagationPolicy` | `foreground` | Wait for child resources |
+          | `retry.limit` | `5` | Retry failed syncs |
+          | `retry.backoff` | `5s / factor:2 / max:3m` | Exponential backoff |
+
+          EOF
+
+      - name: Kubernetes Architecture
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          ## ☸️ Kubernetes Architecture
+
+          ### Cluster Topology
+
+          ```mermaid
+          flowchart TB
+              subgraph AWS_REGION["AWS us-west-2"]
+                  subgraph VPC["VPC"]
+                      subgraph HUB["🎯 Hub Cluster: argocd-usw2"]
+                          ARGO_NS["namespace: argocd<br/>ArgoCD Server + Repo Server + App Controller"]
+                      end
+
+                      subgraph SPOKE["🎡 Spoke Cluster: opsera-usw2-np"]
+                          subgraph DEV_NS["namespace: voting01-dev"]
+                              D_DEPLOY["Deployments (3)"]
+                              D_SVC["Services (2)"]
+                              D_ING["Ingress"]
+                              D_CM["ConfigMap"]
+                              D_SA["ServiceAccounts (3)"]
+                          end
+                          subgraph QA_NS["namespace: voting01-qa"]
+                              Q_ROLL["Rollouts (2) + Deployment (1)"]
+                              Q_SVC["Services (2+2 canary)"]
+                              Q_ING["Ingress"]
+                              Q_AT["AnalysisTemplate"]
+                          end
+                          subgraph STG_NS["namespace: voting01-staging"]
+                              S_ROLL["Rollouts (2) + Deployment (1)"]
+                              S_SVC["Services (2+2 preview)"]
+                              S_ING["Ingress (active+preview)"]
+                          end
+                          subgraph UAT_NS["namespace: voting01-uat"]
+                              U_ROLL["Rollouts (2) + Deployment (1)"]
+                              U_SVC["Services (2+2 canary)"]
+                              U_ING["Ingress"]
+                              U_AT["AnalysisTemplate"]
+                          end
+                          subgraph MOCK1_NS["namespace: voting01-mock1"]
+                              M_DEPLOY["Deployments (3)"]
+                              M_SVC["Services (2)"]
+                              M_ING["Ingress"]
+                              M_CM["ConfigMap"]
+                          end
+                      end
+                  end
+
+                  ECR["🐳 ECR Registry<br/>792373136340.dkr.ecr.us-west-2.amazonaws.com"]
+                  RDS[("🐘 RDS PostgreSQL")]
+                  ELASTICACHE[("🔴 ElastiCache Redis")]
+              end
+
+              SPOKE -.->|"pull images"| ECR
+              DEV_NS & QA_NS & STG_NS & UAT_NS & MOCK1_NS -.-> RDS & ELASTICACHE
+          ```
+
+          ### Per-Environment Kubernetes Resources
+
+          | Resource | DEV | QA | Staging | UAT | Mock1 |
+          |----------|-----|-----|---------|-----|-------|
+          | **Namespace** | `voting01-dev` | `voting01-qa` | `voting01-staging` | `voting01-uat` | `voting01-mock1` |
+          | **Vote** | Deployment (1 replica) | Rollout (Canary) | Rollout (Blue-Green) | Rollout (Canary) | Deployment (1 replica) |
+          | **Result** | Deployment (1 replica) | Rollout (Canary) | Rollout (Blue-Green) | Rollout (Canary) | Deployment (1 replica) |
+          | **Worker** | Deployment (1 replica) | Deployment (1 replica) | Deployment (1 replica) | Deployment (1 replica) | Deployment (1 replica) |
+          | **Services** | 2 (ClusterIP) | 4 (active + canary) | 4 (active + preview) | 4 (active + canary) | 2 (ClusterIP) |
+          | **Ingress** | NGINX (HTTP) | NGINX (HTTP) | NGINX (active + preview) | NGINX (HTTP) | NGINX (HTTP) |
+          | **ConfigMap** | `voting01-config` | `voting01-config` | `voting01-config` | `voting01-config` | `voting01-config` |
+          | **ServiceAccounts** | 3 (IRSA) | 3 (IRSA) | 3 (IRSA) | 3 (IRSA) | 3 (IRSA) |
+          | **Secrets** | `newrelic-license` | `newrelic-license` | `newrelic-license` | `newrelic-license` | `newrelic-license` |
+          | **AnalysisTemplate** | - | NR error rate < 2% | - | NR error rate < 2% | - |
+
+          ### Kustomize Overlay Structure
+
+          ```
+          .opsera-voting01/k8s/
+          ├── base/                          # Shared base resources
+          │   ├── kustomization.yaml         # Base kustomization
+          │   ├── namespace.yaml             # Namespace (overridden per env)
+          │   ├── vote-deployment.yaml       # Vote Deployment template
+          │   ├── vote-service.yaml          # Vote ClusterIP Service
+          │   ├── result-deployment.yaml     # Result Deployment template
+          │   ├── result-service.yaml        # Result ClusterIP Service
+          │   ├── worker-deployment.yaml     # Worker Deployment template
+          │   └── ingress.yaml              # NGINX Ingress template
+          └── overlays/
+              ├── dev/                       # Rolling deployment
+              │   ├── kustomization.yaml     # namespace, images, patches
+              │   ├── configmap.yaml         # DEV-specific config
+              │   └── serviceaccounts.yaml   # IRSA roles
+              ├── qa/                        # Canary with NR analysis
+              │   ├── kustomization.yaml
+              │   ├── configmap.yaml
+              │   ├── serviceaccounts.yaml
+              │   ├── rollout.yaml           # Argo Rollout (Canary)
+              │   └── analysis-template.yaml # NR error rate check
+              ├── staging/                   # Blue-Green with preview
+              │   ├── kustomization.yaml
+              │   ├── configmap.yaml
+              │   ├── serviceaccounts.yaml
+              │   └── rollout.yaml           # Argo Rollout (Blue-Green)
+              ├── uat/                       # Canary with NR analysis
+              │   ├── kustomization.yaml
+              │   ├── configmap.yaml
+              │   ├── serviceaccounts.yaml
+              │   ├── rollout.yaml
+              │   └── analysis-template.yaml
+              └── mock1/                     # Rolling deployment
+                  ├── kustomization.yaml
+                  ├── configmap.yaml
+                  └── serviceaccounts.yaml
+          ```
+
+          ### Deployment Strategies Deep Dive
+
+          ```mermaid
+          flowchart LR
+              subgraph ROLLING["Rolling (DEV, Mock1)"]
+                  R1["Old Pod 1"] -->|"replace"| R2["New Pod 1"]
+                  R3["maxUnavailable: 0<br/>maxSurge: 1"]
+              end
+
+              subgraph CANARY["Canary (QA, UAT)"]
+                  C1["Stable: 100%"] --> C2["Canary: 20%<br/>Stable: 80%"]
+                  C2 --> C3["Canary: 50%<br/>Stable: 50%"]
+                  C3 --> C4["New: 100%"]
+                  C5["📊 NR Analysis<br/>Error Rate < 2%"]
+                  C2 -.->|"analyze"| C5
+                  C5 -.->|"pass"| C3
+                  C5 -.->|"fail"| C6["🔙 Auto-Rollback"]
+              end
+
+              subgraph BLUEGREEN["Blue-Green (Staging)"]
+                  BG1["🔵 Active Service"] --> BG2["🟢 Preview Service"]
+                  BG2 -->|"manual promote"| BG3["🟢 Becomes Active"]
+                  BG4["Preview URL for testing"]
+              end
+          ```
+
+          ### IRSA (IAM Roles for Service Accounts)
+
+          | Service Account | Environment | IAM Role ARN Pattern |
+          |----------------|-------------|---------------------|
+          | `vote-sa` | All | `arn:aws:iam::792373136340:role/voting01-{env}-vote-irsa` |
+          | `result-sa` | All | `arn:aws:iam::792373136340:role/voting01-{env}-result-irsa` |
+          | `worker-sa` | All | `arn:aws:iam::792373136340:role/voting01-{env}-worker-irsa` |
+
+          > IRSA enables pods to assume AWS IAM roles without embedding credentials. Each service account is annotated with `eks.amazonaws.com/role-arn` to access Secrets Manager for database credentials.
+
+          ### Networking & Ingress
+
+          ```mermaid
+          flowchart LR
+              INTERNET["🌐 Internet"] --> ALB["AWS ALB<br/>*.agent.opsera.dev"]
+              ALB --> NGINX["NGINX Ingress Controller<br/>(Spoke Cluster)"]
+
+              NGINX -->|"vote-voting01-dev"| DEV_VOTE["vote:80"]
+              NGINX -->|"result-voting01-dev"| DEV_RESULT["result:80"]
+              NGINX -->|"vote-voting01-qa"| QA_VOTE["vote:80"]
+              NGINX -->|"vote-voting01-mock1"| MOCK1_VOTE["vote:80"]
+              NGINX -->|"..."| MORE["other envs"]
+          ```
+
+          | Environment | Vote URL | Result URL | Preview URLs |
+          |-------------|----------|------------|--------------|
+          | DEV | `vote-voting01-dev.agent.opsera.dev` | `result-voting01-dev.agent.opsera.dev` | - |
+          | QA | `vote-voting01-qa.agent.opsera.dev` | `result-voting01-qa.agent.opsera.dev` | - |
+          | Staging | `vote-voting01-staging.agent.opsera.dev` | `result-voting01-staging.agent.opsera.dev` | `*-preview.agent.opsera.dev` |
+          | UAT | `vote-voting01-uat.agent.opsera.dev` | `result-voting01-uat.agent.opsera.dev` | - |
+          | Mock1 | `vote-voting01-mock1.agent.opsera.dev` | `result-voting01-mock1.agent.opsera.dev` | - |
+
+          EOF
+
       - name: Infrastructure Architecture
         run: |
           cat << 'EOF' >> $GITHUB_STEP_SUMMARY
@@ -542,22 +855,27 @@ jobs:
               subgraph AWS["AWS us-west-2"]
                   ECR["🐳 ECR"]
                   subgraph EKS["EKS Clusters"]
-                      HUB["🎯 ArgoCD Hub"]
-                      SPOKE["🎡 Workloads"]
+                      HUB["🎯 ArgoCD Hub<br/>argocd-usw2"]
+                      SPOKE["🎡 Workloads<br/>opsera-usw2-np"]
                   end
+                  RDS[("🐘 RDS")]
+                  REDIS[("🔴 ElastiCache")]
               end
 
-              subgraph ENVS["Environments"]
+              subgraph ENVS["Environments (5)"]
                   DEV["🔧 DEV"]
                   QA["🧪 QA"]
                   STG["🎭 Staging"]
+                  UAT["🔬 UAT"]
+                  MOCK1["🧩 Mock1"]
               end
 
               NR["📊 New Relic"]
 
               REPO --> CI --> ECR --> HUB --> SPOKE
-              SPOKE --> DEV & QA & STG
-              DEV & QA & STG --> NR
+              SPOKE --> DEV & QA & STG & UAT & MOCK1
+              DEV & QA & STG & UAT & MOCK1 --> NR
+              DEV & QA & STG & UAT & MOCK1 -.-> RDS & REDIS
           ```
 
           EOF
@@ -616,7 +934,7 @@ jobs:
 
               subgraph QA["🧪 QA Environment"]
                   Q1["CI Build QA"]
-                  Q2["🐤 Canary Deploy<br/>10% → 30% → 60% → 100%"]
+                  Q2["🐤 Canary Deploy<br/>20% → 50% → 100%"]
                   Q3["APM Analysis"]
               end
 
@@ -626,11 +944,26 @@ jobs:
                   S3["Traffic Switch"]
               end
 
+              subgraph UAT_ENV["🔬 UAT Environment"]
+                  U1["CI Build UAT"]
+                  U2["🐤 Canary Deploy"]
+                  U3["APM Analysis"]
+              end
+
+              subgraph MOCK1_ENV["🧩 MOCK1 Environment"]
+                  M1["CI Build Mock1"]
+                  M2["Rolling Deploy"]
+              end
+
               D1 --> D2
               D2 -->|"Manual Promote"| Q1
               Q1 --> Q2 --> Q3
               Q3 -->|"Approval Gate"| S1
               S1 --> S2 --> S3
+              S3 -->|"Approve"| U1
+              U1 --> U2 --> U3
+              D2 -->|"Manual"| M1
+              M1 --> M2
           ```
 
           ### Workflow Files
@@ -640,6 +973,8 @@ jobs:
           echo "| DEV CI/CD | [ci-build-push-voting01-dev.yaml](${REPO_URL}/blob/main/.github/workflows/ci-build-push-voting01-dev.yaml) | Push to main | Rolling |" >> $GITHUB_STEP_SUMMARY
           echo "| QA CI/CD | [ci-build-push-voting01-qa.yaml](${REPO_URL}/blob/main/.github/workflows/ci-build-push-voting01-qa.yaml) | Manual / Dispatch | Canary |" >> $GITHUB_STEP_SUMMARY
           echo "| Staging CI/CD | [ci-build-push-voting01-staging.yaml](${REPO_URL}/blob/main/.github/workflows/ci-build-push-voting01-staging.yaml) | Manual / Dispatch | Blue-Green |" >> $GITHUB_STEP_SUMMARY
+          echo "| UAT CI/CD | [ci-build-push-voting01-uat.yaml](${REPO_URL}/blob/main/.github/workflows/ci-build-push-voting01-uat.yaml) | Manual / Dispatch | Canary |" >> $GITHUB_STEP_SUMMARY
+          echo "| Mock1 CI/CD | [ci-build-push-voting01-mock1.yaml](${REPO_URL}/blob/main/.github/workflows/ci-build-push-voting01-mock1.yaml) | Manual / Dispatch | Rolling |" >> $GITHUB_STEP_SUMMARY
           echo "| Promotion | [promote-voting01.yaml](${REPO_URL}/blob/main/.github/workflows/promote-voting01.yaml) | Manual | Health Check + Dispatch |" >> $GITHUB_STEP_SUMMARY
           echo "| Bootstrap | [00-bootstrap-infrastructure-voting01.yaml](${REPO_URL}/blob/main/.github/workflows/00-bootstrap-infrastructure-voting01.yaml) | Manual | Terraform + ArgoCD |" >> $GITHUB_STEP_SUMMARY
           echo "| Landscape | [deployment-landscape-voting01.yaml](${REPO_URL}/blob/main/.github/workflows/deployment-landscape-voting01.yaml) | Schedule / Push | Report Only |" >> $GITHUB_STEP_SUMMARY
@@ -662,12 +997,18 @@ jobs:
           DEV_V: ${{ needs.collect-data.outputs.dev_version }}
           QA_V: ${{ needs.collect-data.outputs.qa_version }}
           STG_V: ${{ needs.collect-data.outputs.staging_version }}
+          UAT_V: ${{ needs.collect-data.outputs.uat_version }}
+          MOCK1_V: ${{ needs.collect-data.outputs.mock1_version }}
           DEV_P: ${{ needs.collect-metrics.outputs.dev_pods }}
           QA_P: ${{ needs.collect-metrics.outputs.qa_pods }}
           STG_P: ${{ needs.collect-metrics.outputs.staging_pods }}
+          UAT_P: ${{ needs.collect-metrics.outputs.uat_pods }}
+          MOCK1_P: ${{ needs.collect-metrics.outputs.mock1_pods }}
           DEV_H: ${{ needs.collect-metrics.outputs.dev_health }}
           QA_H: ${{ needs.collect-metrics.outputs.qa_health }}
           STG_H: ${{ needs.collect-metrics.outputs.staging_health }}
+          UAT_H: ${{ needs.collect-metrics.outputs.uat_health }}
+          MOCK1_H: ${{ needs.collect-metrics.outputs.mock1_health }}
           REPO_URL: https://github.com/${{ env.GITHUB_REPO }}
         run: |
           health_icon() {
@@ -691,11 +1032,13 @@ jobs:
 
           echo "## 🌍 Environment Status" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | Version | Pods | Health | Strategy |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------------|---------|------|--------|----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔧 **DEV** | $(version_link "$DEV_V") | ${DEV_P:-0} | $(health_icon $DEV_H) | Rolling |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🧪 **QA** | $(version_link "$QA_V") | ${QA_P:-0} | $(health_icon $QA_H) | 🐤 Canary |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🎭 **STAGING** | $(version_link "$STG_V") | ${STG_P:-0} | $(health_icon $STG_H) | 🔵🟢 Blue-Green |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Version | Pods | Health | Strategy | ArgoCD App |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|---------|------|--------|----------|------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔧 **DEV** | $(version_link "$DEV_V") | ${DEV_P:-0} | $(health_icon $DEV_H) | Rolling | \`voting01-dev\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 **QA** | $(version_link "$QA_V") | ${QA_P:-0} | $(health_icon $QA_H) | 🐤 Canary | \`voting01-qa\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎭 **STAGING** | $(version_link "$STG_V") | ${STG_P:-0} | $(health_icon $STG_H) | 🔵🟢 Blue-Green | \`voting01-staging\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔬 **UAT** | $(version_link "$UAT_V") | ${UAT_P:-0} | $(health_icon $UAT_H) | 🐤 Canary | \`voting01-uat\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧩 **MOCK1** | $(version_link "$MOCK1_V") | ${MOCK1_P:-0} | $(health_icon $MOCK1_H) | Rolling | \`voting01-mock1\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Deployment History
@@ -703,6 +1046,8 @@ jobs:
           DEV_HIST: ${{ needs.collect-data.outputs.dev_history }}
           QA_HIST: ${{ needs.collect-data.outputs.qa_history }}
           STG_HIST: ${{ needs.collect-data.outputs.staging_history }}
+          UAT_HIST: ${{ needs.collect-data.outputs.uat_history }}
+          MOCK1_HIST: ${{ needs.collect-data.outputs.mock1_history }}
           REPO_URL: https://github.com/${{ env.GITHUB_REPO }}
         run: |
           echo "<details>" >> $GITHUB_STEP_SUMMARY
@@ -771,6 +1116,8 @@ jobs:
           render_history "DEV" "🔧" "$DEV_HIST"
           render_history "QA" "🧪" "$QA_HIST"
           render_history "STAGING" "🎭" "$STG_HIST"
+          render_history "UAT" "🔬" "$UAT_HIST"
+          render_history "MOCK1" "🧩" "$MOCK1_HIST"
 
           echo "</details>" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -790,6 +1137,8 @@ jobs:
           echo "| DEV | [overlays/dev](${REPO_URL}/tree/main/.opsera-voting01/k8s/overlays/dev) | [configmap](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/dev/configmap.yaml) | [kustomization](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/dev/kustomization.yaml) |" >> $GITHUB_STEP_SUMMARY
           echo "| QA | [overlays/qa](${REPO_URL}/tree/main/.opsera-voting01/k8s/overlays/qa) | [configmap](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/qa/configmap.yaml) | [kustomization](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/qa/kustomization.yaml) |" >> $GITHUB_STEP_SUMMARY
           echo "| Staging | [overlays/staging](${REPO_URL}/tree/main/.opsera-voting01/k8s/overlays/staging) | [configmap](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/staging/configmap.yaml) | [kustomization](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/staging/kustomization.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| UAT | [overlays/uat](${REPO_URL}/tree/main/.opsera-voting01/k8s/overlays/uat) | [configmap](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/uat/configmap.yaml) | [kustomization](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/uat/kustomization.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Mock1 | [overlays/mock1](${REPO_URL}/tree/main/.opsera-voting01/k8s/overlays/mock1) | [configmap](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/mock1/configmap.yaml) | [kustomization](${REPO_URL}/blob/main/.opsera-voting01/k8s/overlays/mock1/kustomization.yaml) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### ▶️ Run Workflows" >> $GITHUB_STEP_SUMMARY
           echo "| Action | Link |" >> $GITHUB_STEP_SUMMARY
@@ -797,6 +1146,8 @@ jobs:
           echo "| 🔧 Deploy to DEV | [▶️ Run CI Build DEV](${REPO_URL}/actions/workflows/ci-build-push-voting01-dev.yaml) |" >> $GITHUB_STEP_SUMMARY
           echo "| 🧪 Deploy to QA | [▶️ Run CI Build QA](${REPO_URL}/actions/workflows/ci-build-push-voting01-qa.yaml) |" >> $GITHUB_STEP_SUMMARY
           echo "| 🎭 Deploy to Staging | [▶️ Run CI Build Staging](${REPO_URL}/actions/workflows/ci-build-push-voting01-staging.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔬 Deploy to UAT | [▶️ Run CI Build UAT](${REPO_URL}/actions/workflows/ci-build-push-voting01-uat.yaml) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧩 Deploy to Mock1 | [▶️ Run CI Build Mock1](${REPO_URL}/actions/workflows/ci-build-push-voting01-mock1.yaml) |" >> $GITHUB_STEP_SUMMARY
           echo "| ⬆️ Promote Environment | [▶️ Run Promotion](${REPO_URL}/actions/workflows/promote-voting01.yaml) |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔍 Run Diagnostics | [▶️ Run Diagnostics](${REPO_URL}/actions/workflows/diagnostics-voting01.yaml) |" >> $GITHUB_STEP_SUMMARY
           echo "| 📊 Refresh Landscape | [▶️ Run Landscape](${REPO_URL}/actions/workflows/deployment-landscape-voting01.yaml) |" >> $GITHUB_STEP_SUMMARY
@@ -811,6 +1162,8 @@ jobs:
           | 🔧 DEV | [vote-voting01-dev.agent.opsera.dev](https://vote-voting01-dev.agent.opsera.dev) | [result-voting01-dev.agent.opsera.dev](https://result-voting01-dev.agent.opsera.dev) |
           | 🧪 QA | [vote-voting01-qa.agent.opsera.dev](https://vote-voting01-qa.agent.opsera.dev) | [result-voting01-qa.agent.opsera.dev](https://result-voting01-qa.agent.opsera.dev) |
           | 🎭 Staging | [vote-voting01-staging.agent.opsera.dev](https://vote-voting01-staging.agent.opsera.dev) | [result-voting01-staging.agent.opsera.dev](https://result-voting01-staging.agent.opsera.dev) |
+          | 🔬 UAT | [vote-voting01-uat.agent.opsera.dev](https://vote-voting01-uat.agent.opsera.dev) | [result-voting01-uat.agent.opsera.dev](https://result-voting01-uat.agent.opsera.dev) |
+          | 🧩 Mock1 | [vote-voting01-mock1.agent.opsera.dev](https://vote-voting01-mock1.agent.opsera.dev) | [result-voting01-mock1.agent.opsera.dev](https://result-voting01-mock1.agent.opsera.dev) |
 
           EOF
 
@@ -825,6 +1178,8 @@ jobs:
           | DEV | voting01-vote-dev | voting01-result-dev | voting01-worker-dev |
           | QA | voting01-vote-qa | voting01-result-qa | voting01-worker-qa |
           | Staging | voting01-vote-staging | voting01-result-staging | voting01-worker-staging |
+          | UAT | voting01-vote-uat | voting01-result-uat | voting01-worker-uat |
+          | Mock1 | voting01-vote-mock1 | voting01-result-mock1 | voting01-worker-mock1 |
 
           🔗 [Open New Relic Dashboard](https://one.newrelic.com)
 
@@ -851,12 +1206,15 @@ jobs:
 
           ```mermaid
           flowchart LR
-              DEV["🔧 DEV<br/>Auto-deploy on push"]
-              QA["🧪 QA<br/>Manual trigger<br/>🐤 Canary 10→30→60→100%"]
+              DEV["🔧 DEV<br/>Auto-deploy on push<br/>Rolling"]
+              QA["🧪 QA<br/>Manual trigger<br/>🐤 Canary 20→50→100%"]
               STG["🎭 STAGING<br/>Approval required<br/>🔵🟢 Blue-Green"]
+              UAT["🔬 UAT<br/>Manual trigger<br/>🐤 Canary 20→50→100%"]
+              MOCK1["🧩 MOCK1<br/>Manual trigger<br/>Rolling"]
               PROD["🏭 PRODUCTION<br/>Coming Soon"]
 
-              DEV -->|"promote"| QA -->|"approve"| STG -.->|"future"| PROD
+              DEV -->|"promote"| QA -->|"approve"| STG -->|"approve"| UAT -.->|"future"| PROD
+              DEV -->|"manual"| MOCK1
           ```
 
           EOF
