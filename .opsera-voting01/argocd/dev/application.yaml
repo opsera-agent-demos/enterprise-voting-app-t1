@@ -11,7 +11,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/opsera-agentic/enterprise-voting-app-t1.git
+    repoURL: https://github.com/opsera-agent-demos/enterprise-voting-demo-only.git
     targetRevision: main
     path: .opsera-voting01/k8s/overlays/dev
   destination:
