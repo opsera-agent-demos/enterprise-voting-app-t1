@@ -74,7 +74,7 @@ spec:
       steps:
         # Phase 1: Initial canary (20% traffic)
         - setWeight: 20
-        - pause: {duration: 2m}
+        - pause: {duration: 1m}
         - analysis:
             templates:
               - templateName: voting01-health-check
@@ -86,7 +86,7 @@ spec:
 
         # Phase 2: Expanded canary (50% traffic) with New Relic error rate analysis
         - setWeight: 50
-        - pause: {duration: 3m}
+        - pause: {duration: 1m}
         - analysis:
             templates:
               - templateName: voting01-canary-analysis
