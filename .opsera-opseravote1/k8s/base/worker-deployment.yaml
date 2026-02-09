@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app: worker
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: processor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        app.kubernetes.io/name: worker
+    spec:
+      serviceAccountName: worker-sa
+      containers:
+        - name: worker
+          image: PLACEHOLDER_WORKER_IMAGE
+          envFrom:
+            - configMapRef:
+                name: opseravote1-config
+            - secretRef:
+                name: newrelic-license
+                optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

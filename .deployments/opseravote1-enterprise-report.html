@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Opsera Enterprise Report - opseravote1</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --yellow: #d29922; --red: #f85149; --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+  .header { text-align: center; padding: 3rem 0; border-bottom: 1px solid var(--border); margin-bottom: 2rem; }
+  .header h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  .header .subtitle { color: var(--muted); font-size: 1.1rem; }
+  .logo { font-size: 3rem; margin-bottom: 1rem; font-family: monospace; color: var(--accent); }
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; margin: 0 4px; }
+  .badge-green { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .badge-blue { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.3); }
+  .badge-purple { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
+  .badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.3); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; text-align: center; }
+  .stat-card .number { font-size: 2.5rem; font-weight: 700; color: var(--accent); }
+  .stat-card .label { color: var(--muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin: 1.5rem 0; overflow: hidden; }
+  .section-header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
+  .section-body { padding: 1.5rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 10px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { font-size: 0.9rem; }
+  .status-ok { color: var(--green); }
+  .status-warn { color: var(--yellow); }
+  .check { color: var(--green); }
+  pre { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 1rem; overflow-x: auto; font-size: 0.85rem; color: var(--muted); }
+  code { font-family: 'SF Mono', 'Fira Code', monospace; }
+  .pipeline-flow { display: flex; align-items: center; justify-content: center; gap: 0; flex-wrap: wrap; padding: 1rem 0; }
+  .pipeline-stage { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; text-align: center; min-width: 120px; }
+  .pipeline-stage .icon { font-size: 1.5rem; }
+  .pipeline-stage .name { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+  .pipeline-arrow { color: var(--accent); font-size: 1.5rem; padding: 0 4px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  .tree { font-family: monospace; font-size: 0.85rem; line-height: 1.8; color: var(--accent); }
+  .footer { text-align: center; padding: 2rem 0; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--border); margin-top: 2rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="logo">OPSERA</div>
+    <h1>Enterprise Pipeline Report</h1>
+    <div class="subtitle">Application: <strong>opseravote1</strong> | Generated: 2026-02-08 | Skill v0.920</div>
+    <div style="margin-top: 1rem;">
+      <span class="badge badge-green">AWS EKS</span>
+      <span class="badge badge-blue">ArgoCD GitOps</span>
+      <span class="badge badge-purple">Multi-Service</span>
+      <span class="badge badge-yellow">Enterprise Ready</span>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat-card">
+      <div class="number">20</div>
+      <div class="label">Files Generated</div>
+    </div>
+    <div class="stat-card">
+      <div class="number">4</div>
+      <div class="label">Workflows</div>
+    </div>
+    <div class="stat-card">
+      <div class="number">3</div>
+      <div class="label">Services</div>
+    </div>
+    <div class="stat-card">
+      <div class="number">8</div>
+      <div class="label">Pipeline Stages</div>
+    </div>
+    <div class="stat-card">
+      <div class="number">183</div>
+      <div class="label">Rules Applied</div>
+    </div>
+  </div>
+
+  <!-- PIPELINE FLOW -->
+  <div class="section">
+    <div class="section-header">CI/CD Pipeline Architecture</div>
+    <div class="section-body">
+      <div class="pipeline-flow">
+        <div class="pipeline-stage"><div class="icon">🔒</div><div class="name">Gitleaks</div></div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage"><div class="icon">📊</div><div class="name">SonarQube</div></div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage"><div class="icon">🏗️</div><div class="name">Build</div></div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage"><div class="icon">🛡️</div><div class="name">Grype Scan</div></div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage"><div class="icon">📦</div><div class="name">ECR Push</div></div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage"><div class="icon">🚀</div><div class="name">ArgoCD</div></div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage"><div class="icon">✅</div><div class="name">Verify</div></div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-stage"><div class="icon">🌍</div><div class="name">Landscape</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONFIGURATION -->
+  <div class="grid-2">
+    <div class="section">
+      <div class="section-header">Infrastructure Configuration</div>
+      <div class="section-body">
+        <table>
+          <tr><td>Cloud Provider</td><td><strong>AWS (EKS)</strong></td></tr>
+          <tr><td>Region</td><td><code>us-west-2</code></td></tr>
+          <tr><td>Hub Cluster</td><td><code>argocd-usw2</code></td></tr>
+          <tr><td>Spoke Cluster</td><td><code>opsera-usw2-np</code></td></tr>
+          <tr><td>Container Registry</td><td>AWS ECR</td></tr>
+          <tr><td>Domain</td><td><code>agent.opsera.dev</code></td></tr>
+          <tr><td>Tenant</td><td><code>opsera</code></td></tr>
+          <tr><td>GitOps</td><td>ArgoCD (Hub-Spoke)</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">Application Services</div>
+      <div class="section-body">
+        <table>
+          <tr><th>Service</th><th>Runtime</th><th>Port</th></tr>
+          <tr><td><strong>Vote</strong> (Frontend)</td><td>Python 3.11 / Flask</td><td>80</td></tr>
+          <tr><td><strong>Result</strong> (Backend)</td><td>Node.js 18 / Express</td><td>80</td></tr>
+          <tr><td><strong>Worker</strong> (Processor)</td><td>.NET 7.0</td><td>-</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ENVIRONMENTS -->
+  <div class="section">
+    <div class="section-header">Environment Configuration</div>
+    <div class="section-body">
+      <table>
+        <tr>
+          <th>Environment</th><th>Namespace</th><th>Strategy</th><th>Replicas</th><th>Vote URL</th><th>Result URL</th>
+        </tr>
+        <tr>
+          <td><span class="badge badge-green">DEV</span></td>
+          <td><code>opseravote1-dev</code></td>
+          <td>Rolling</td>
+          <td>1</td>
+          <td><a href="https://vote-opseravote1-dev.agent.opsera.dev">vote-opseravote1-dev</a></td>
+          <td><a href="https://result-opseravote1-dev.agent.opsera.dev">result-opseravote1-dev</a></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- WORKFLOWS -->
+  <div class="section">
+    <div class="section-header">GitHub Actions Workflows</div>
+    <div class="section-body">
+      <table>
+        <tr><th>Workflow</th><th>File</th><th>Trigger</th><th>Purpose</th></tr>
+        <tr>
+          <td><strong>00-Bootstrap</strong></td>
+          <td><code>00-bootstrap-infrastructure-opseravote1.yaml</code></td>
+          <td>Manual</td>
+          <td>ECR repos, Namespace, ArgoCD app setup</td>
+        </tr>
+        <tr>
+          <td><strong>CI Build (DEV)</strong></td>
+          <td><code>ci-build-push-opseravote1-dev.yaml</code></td>
+          <td>Push to main + Manual</td>
+          <td>Build, scan, push, deploy 3 services</td>
+        </tr>
+        <tr>
+          <td><strong>Diagnostics</strong></td>
+          <td><code>diagnostics-opseravote1.yaml</code></td>
+          <td>Manual</td>
+          <td>Full pipeline health check</td>
+        </tr>
+        <tr>
+          <td><strong>Landscape</strong></td>
+          <td><code>deployment-landscape-opseravote1.yaml</code></td>
+          <td>Auto (post-deploy)</td>
+          <td>Dashboard update &amp; S3 publish</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- SECURITY & QUALITY -->
+  <div class="grid-2">
+    <div class="section">
+      <div class="section-header">Security Gates</div>
+      <div class="section-body">
+        <table>
+          <tr><td><span class="check">✓</span> Gitleaks Secret Scanning</td><td class="status-ok">Enabled</td></tr>
+          <tr><td><span class="check">✓</span> Grype Container Scanning</td><td class="status-ok">Enabled</td></tr>
+          <tr><td><span class="check">✓</span> ECR Image Scanning</td><td class="status-ok">On Push</td></tr>
+          <tr><td><span class="check">✓</span> Non-root Containers</td><td class="status-ok">Enforced</td></tr>
+          <tr><td><span class="check">✓</span> IRSA (IAM Roles)</td><td class="status-ok">Configured</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">Quality & Integrations</div>
+      <div class="section-body">
+        <table>
+          <tr><td><span class="check">✓</span> SonarQube Quality Gates</td><td class="status-ok">Non-blocking</td></tr>
+          <tr><td><span class="check">✓</span> Slack Notifications</td><td class="status-ok">Configured</td></tr>
+          <tr><td><span class="check">✓</span> Jira Issue Creation</td><td class="status-ok">On Failure</td></tr>
+          <tr><td><span class="check">✓</span> New Relic APM</td><td class="status-ok">Enabled</td></tr>
+          <tr><td><span class="check">✓</span> Deployment Landscape</td><td class="status-ok">Auto-publish</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- FILE TREE -->
+  <div class="section">
+    <div class="section-header">Generated File Structure</div>
+    <div class="section-body">
+      <pre><code class="tree">.opsera-opseravote1/
+├── opsera-config.yaml                    # Single source of truth
+├── Dockerfiles/
+│   ├── Dockerfile.vote                   # Python Flask (multi-stage)
+│   ├── Dockerfile.result                 # Node.js Express (multi-stage)
+│   └── Dockerfile.worker                 # .NET 7.0 (multi-stage)
+├── k8s/
+│   ├── base/
+│   │   ├── kustomization.yaml            # Base Kustomization
+│   │   ├── namespace.yaml                # Namespace definition
+│   │   ├── vote-deployment.yaml          # Vote Deployment
+│   │   ├── vote-service.yaml             # Vote ClusterIP Service
+│   │   ├── result-deployment.yaml        # Result Deployment
+│   │   ├── result-service.yaml           # Result ClusterIP Service
+│   │   ├── worker-deployment.yaml        # Worker Deployment
+│   │   └── ingress.yaml                  # NGINX Ingress (HTTP)
+│   └── overlays/
+│       └── dev/
+│           ├── kustomization.yaml        # DEV overlay + images
+│           ├── configmap.yaml            # DEV ConfigMap
+│           └── serviceaccounts.yaml      # IRSA ServiceAccounts
+└── argocd/
+    └── dev/
+        └── application.yaml              # ArgoCD Application (hub-spoke)
+
+.github/workflows/
+├── 00-bootstrap-infrastructure-opseravote1.yaml  # Bootstrap (6 jobs)
+├── ci-build-push-opseravote1-dev.yaml            # CI/CD DEV (6 stages)
+├── diagnostics-opseravote1.yaml                  # Full diagnostics
+└── deployment-landscape-opseravote1.yaml          # Dashboard publisher</code></pre>
+    </div>
+  </div>
+
+  <!-- GUARDRAILS -->
+  <div class="section">
+    <div class="section-header">Guardrails Compliance</div>
+    <div class="section-body">
+      <table>
+        <tr><th>Rule</th><th>Description</th><th>Status</th></tr>
+        <tr><td>RULE 59</td><td>ArgoCD destination.name (not server)</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 64</td><td>Domain: agent.opsera.dev</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 74</td><td>Non-root containers</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 104-105</td><td>HTTP-only Ingress, dual class</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 106</td><td>Labels with includeSelectors</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 123-125</td><td>No local kubectl/AWS CLI</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 127</td><td>Bootstrap before CI/CD</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 143</td><td>Git pull before push</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 147</td><td>Dynamic AWS_ACCOUNT_ID</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 148</td><td>Workflow permissions</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 149</td><td>ArgoCD hub-spoke destination</td><td class="status-ok">✅ Compliant</td></tr>
+        <tr><td>RULE 163</td><td>ECR pull secret refresh</td><td class="status-ok">✅ Compliant</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- EXECUTION STEPS -->
+  <div class="section">
+    <div class="section-header">Deployment Execution Steps</div>
+    <div class="section-body">
+      <table>
+        <tr><th>Step</th><th>Command</th><th>Description</th></tr>
+        <tr>
+          <td><span class="badge badge-blue">1</span></td>
+          <td><code>gh workflow run "00-Bootstrap (opseravote1)"</code></td>
+          <td>Create ECR repos, namespace, ArgoCD app</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-blue">2</span></td>
+          <td><code>gh run list --workflow="00-bootstrap-infrastructure-opseravote1.yaml" --limit 1</code></td>
+          <td>Verify bootstrap success</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-green">3</span></td>
+          <td><code>gh workflow run "CI Build (opseravote1-dev)"</code></td>
+          <td>Build, scan, push, deploy all services</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-green">4</span></td>
+          <td>Automatic</td>
+          <td>Landscape dashboard auto-updates</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- DASHBOARD LINK -->
+  <div class="section">
+    <div class="section-header">Deployment Dashboard</div>
+    <div class="section-body" style="text-align: center; padding: 2rem;">
+      <p style="font-size: 1.2rem; margin-bottom: 1rem;">View live deployment status at the centralized dashboard:</p>
+      <a href="https://deployments.agent.opsera.dev" style="display: inline-block; padding: 12px 32px; background: var(--accent); color: #fff; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 1.1rem;">
+        deployments.agent.opsera.dev
+      </a>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <p>Generated by <strong>Opsera Code-to-Cloud Enterprise v0.920</strong></p>
+    <p>692 Learnings | 183 Rules | 45 Templates</p>
+    <p style="margin-top: 0.5rem;">© 2026 Opsera — Powered by AI-Driven DevOps</p>
+  </div>
+
+</div>
+</body>
+</html>

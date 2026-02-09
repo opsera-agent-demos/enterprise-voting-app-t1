@@ -1,0 +1,23 @@
+# ════════════════════════════════════════════════════════════════════════════════
+# Dockerfile.worker - .NET Worker Service
+# Multi-stage build with security best practices
+# ════════════════════════════════════════════════════════════════════════════════
+
+FROM mcr.microsoft.com/dotnet/sdk:7.0 AS build
+
+WORKDIR /source
+COPY worker/*.csproj .
+RUN dotnet restore
+
+COPY worker/ .
+RUN dotnet publish -c Release -o /app --no-restore
+
+FROM mcr.microsoft.com/dotnet/runtime:7.0
+
+WORKDIR /app
+COPY --from=build /app .
+
+# Non-root user
+USER 1000
+
+ENTRYPOINT ["dotnet", "Worker.dll"]

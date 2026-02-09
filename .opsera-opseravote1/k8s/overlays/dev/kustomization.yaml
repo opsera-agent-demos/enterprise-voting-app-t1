@@ -1,0 +1,49 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: opseravote1-dev
+
+resources:
+  - ../../base
+  - configmap.yaml
+  - serviceaccounts.yaml
+
+commonLabels:
+  environment: dev
+
+patches:
+  - target:
+      kind: Ingress
+      name: opseravote1-ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: vote-opseravote1-dev.agent.opsera.dev
+      - op: replace
+        path: /spec/rules/1/host
+        value: result-opseravote1-dev.agent.opsera.dev
+  - target:
+      kind: Deployment
+      name: vote
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: result
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+
+images:
+  - name: PLACEHOLDER_VOTE_IMAGE
+    newName: PLACEHOLDER_ECR_REGISTRY/opsera/opseravote1-vote
+    newTag: latest
+  - name: PLACEHOLDER_RESULT_IMAGE
+    newName: PLACEHOLDER_ECR_REGISTRY/opsera/opseravote1-result
+    newTag: latest
+  - name: PLACEHOLDER_WORKER_IMAGE
+    newName: PLACEHOLDER_ECR_REGISTRY/opsera/opseravote1-worker
+    newTag: latest
