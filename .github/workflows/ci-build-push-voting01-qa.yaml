@@ -123,6 +123,50 @@ jobs:
 
           echo "✅ New Relic secret configured for $NS" >> $GITHUB_STEP_SUMMARY
 
+      - name: Cleanup Stale AnalysisRuns
+        run: |
+          aws eks update-kubeconfig --name ${{ env.SPOKE_CLUSTER }} --region ${{ env.AWS_REGION }}
+          NS="${{ env.APP_NAME }}-${{ env.ENVIRONMENT }}"
+
+          echo "🧹 Cleaning up stale AnalysisRuns in $NS..."
+
+          # Get current pod template hashes from active rollouts
+          VOTE_HASH=$(kubectl get rollout vote -n $NS -o jsonpath='{.status.currentPodHash}' 2>/dev/null || echo "")
+          RESULT_HASH=$(kubectl get rollout result -n $NS -o jsonpath='{.status.currentPodHash}' 2>/dev/null || echo "")
+
+          # Count before cleanup
+          TOTAL_BEFORE=$(kubectl get analysisrun -n $NS --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          echo "  Total AnalysisRuns before cleanup: ${TOTAL_BEFORE}"
+
+          # Delete completed/failed AnalysisRuns that DON'T belong to current revision
+          DELETED=0
+          for AR in $(kubectl get analysisrun -n $NS -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null); do
+            AR_HASH=$(kubectl get analysisrun "$AR" -n $NS -o jsonpath='{.metadata.labels.rollouts-pod-template-hash}' 2>/dev/null || echo "")
+            AR_PHASE=$(kubectl get analysisrun "$AR" -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+
+            # Skip if it belongs to the current revision of either rollout
+            if [ "$AR_HASH" = "$VOTE_HASH" ] || [ "$AR_HASH" = "$RESULT_HASH" ]; then
+              continue
+            fi
+
+            # Delete if it's completed (Successful or Failed) and from an old revision
+            if [ "$AR_PHASE" = "Successful" ] || [ "$AR_PHASE" = "Failed" ]; then
+              kubectl delete analysisrun "$AR" -n $NS 2>/dev/null && DELETED=$((DELETED + 1))
+            fi
+          done
+
+          TOTAL_AFTER=$(kubectl get analysisrun -n $NS --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          echo "  Deleted: ${DELETED} stale AnalysisRuns"
+          echo "  Remaining: ${TOTAL_AFTER}"
+
+          echo "### 🧹 AnalysisRun Cleanup" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Before | ${TOTAL_BEFORE} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deleted (stale) | ${DELETED} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Remaining | ${TOTAL_AFTER} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
       - name: Trigger ArgoCD Sync
         run: |
           aws eks update-kubeconfig --name ${{ env.HUB_CLUSTER }} --region ${{ env.AWS_REGION }}
@@ -239,19 +283,34 @@ jobs:
             printf "│ Phase: %-12s                                                        │\n" "$WORKER_PHASE"
             echo "└─────────────────────────────────────────────────────────────────────────────┘"
 
-            # Check for analysis runs
-            echo ""
-            echo "📈 Active Analysis Runs:"
-            ANALYSIS_RUNS=$(kubectl get analysisrun -n $NS -l rollouts-pod-template-hash --sort-by=.metadata.creationTimestamp 2>/dev/null | tail -5 || echo "None found")
-            echo "$ANALYSIS_RUNS"
+            # Get current revision pod template hashes to filter analysis runs
+            VOTE_HASH=$(kubectl get rollout vote -n $NS -o jsonpath='{.status.currentPodHash}' 2>/dev/null || echo "")
+            RESULT_HASH=$(kubectl get rollout result -n $NS -o jsonpath='{.status.currentPodHash}' 2>/dev/null || echo "")
 
-            # Check latest analysis run result
-            LATEST_AR=$(kubectl get analysisrun -n $NS -l rollouts-pod-template-hash -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+            # Show analysis runs for current revision only
+            echo ""
+            echo "📈 Active Analysis Runs (current revision):"
+            if [ -n "$VOTE_HASH" ]; then
+              kubectl get analysisrun -n $NS -l rollouts-pod-template-hash=$VOTE_HASH --sort-by=.metadata.creationTimestamp 2>/dev/null | tail -5 || true
+            fi
+            if [ -n "$RESULT_HASH" ] && [ "$RESULT_HASH" != "$VOTE_HASH" ]; then
+              kubectl get analysisrun -n $NS -l rollouts-pod-template-hash=$RESULT_HASH --sort-by=.metadata.creationTimestamp 2>/dev/null | tail -5 || true
+            fi
+
+            # Get latest analysis run for current revision (not stale ones)
+            LATEST_AR=""
+            if [ -n "$VOTE_HASH" ]; then
+              LATEST_AR=$(kubectl get analysisrun -n $NS -l rollouts-pod-template-hash=$VOTE_HASH --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+            fi
+            if [ -z "$LATEST_AR" ] && [ -n "$RESULT_HASH" ]; then
+              LATEST_AR=$(kubectl get analysisrun -n $NS -l rollouts-pod-template-hash=$RESULT_HASH --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+            fi
+
             if [ -n "$LATEST_AR" ]; then
               AR_PHASE=$(kubectl get analysisrun $LATEST_AR -n $NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
               AR_MSG=$(kubectl get analysisrun $LATEST_AR -n $NS -o jsonpath='{.status.message}' 2>/dev/null || echo "")
               echo ""
-              echo "🔬 Latest Analysis: $LATEST_AR"
+              echo "🔬 Latest Analysis (current revision): $LATEST_AR"
               echo "   Status: $AR_PHASE"
               [ -n "$AR_MSG" ] && echo "   Message: $AR_MSG"
             fi
