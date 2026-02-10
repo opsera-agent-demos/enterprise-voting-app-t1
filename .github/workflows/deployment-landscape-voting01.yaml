@@ -156,8 +156,10 @@ jobs:
 
           for ENV in dev qa staging uat mock1 sbx1; do
             NS="${{ env.APP_NAME }}-${ENV}"
-            PODS=$(kubectl get pods -n $NS --no-headers 2>/dev/null | grep -c Running || echo "0")
-            READY=$(kubectl get pods -n $NS --no-headers 2>/dev/null | grep -c "1/1\|2/2\|3/3" || echo "0")
+            PODS=$(kubectl get pods -n $NS --no-headers 2>/dev/null | grep Running | wc -l | tr -d ' ')
+            READY=$(kubectl get pods -n $NS --no-headers 2>/dev/null | grep -E "1/1|2/2|3/3" | wc -l | tr -d ' ')
+            PODS=${PODS:-0}
+            READY=${READY:-0}
             echo "${ENV}_pods=${PODS}" >> $GITHUB_OUTPUT
             if [ "$PODS" -gt 0 ] && [ "$READY" -eq "$PODS" ]; then
               echo "${ENV}_health=healthy" >> $GITHUB_OUTPUT
