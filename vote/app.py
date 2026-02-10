@@ -6,8 +6,8 @@
 # ════════════════════════════════════════════════════════════════════════════════
 import os
 
-# Application version - Header-based error simulation v24
-APP_VERSION = "2026.02.08-v24"
+# Application version - Explicit NR notice_error + parallel burst sim v25
+APP_VERSION = "2026.02.10-v25"
 
 # Log New Relic configuration status at startup
 _nr_license = os.getenv('NEW_RELIC_LICENSE_KEY')
@@ -26,6 +26,14 @@ import socket
 import random
 import json
 import logging
+import traceback
+
+# New Relic explicit error reporting - critical for reliable error capture
+try:
+    import newrelic.agent
+    NR_AVAILABLE = True
+except ImportError:
+    NR_AVAILABLE = False
 
 option_a = os.getenv('OPTION_A', "Cats")
 option_b = os.getenv('OPTION_B', "Dogs")
@@ -71,6 +79,27 @@ def health():
     """Health check - always returns 200"""
     return jsonify({'status': 'healthy', 'hostname': hostname})
 
+def _report_simulated_error(error_msg):
+    """Report error explicitly to New Relic AND return a 500 response.
+    
+    Using notice_error() ensures NR captures it as an error transaction
+    regardless of Flask/WSGI middleware ordering. Returns a proper 500
+    response instead of raising an unhandled exception (avoids gunicorn
+    worker restarts and ensures consistent HTTP 500 status).
+    """
+    exc = Exception(error_msg)
+    app.logger.error('SIMULATED ERROR: %s', error_msg)
+
+    if NR_AVAILABLE:
+        # Explicitly record the error in New Relic - this is the reliable path
+        newrelic.agent.notice_error(error=exc)
+        # Also add a custom attribute so we can filter in NR dashboards
+        newrelic.agent.add_custom_parameter('simulated_error', True)
+        newrelic.agent.add_custom_parameter('error_source', 'error_simulation')
+
+    return error_msg, 500
+
+
 @app.route("/", methods=['POST','GET'])
 def hello():
     global ERROR_SIM_ENABLED
@@ -84,13 +113,15 @@ def hello():
     if request.method == 'POST':
         # Header-based error injection (used by GHA error-rate simulation script)
         if request.headers.get('X-Simulate-Error') == 'true':
-            app.logger.error('SIMULATED ERROR: triggered by X-Simulate-Error header')
-            raise Exception('Simulated Error: error rate simulation via GHA script')
+            return _report_simulated_error(
+                'Simulated Error: error rate simulation via GHA script'
+            )
 
-        # If error simulation is ON, raise exception (captured by New Relic)
+        # If error simulation is ON, return 500 (captured by New Relic)
         if ERROR_SIM_ENABLED:
-            app.logger.error('SIMULATED ERROR: Error simulation is ON')
-            raise Exception('Simulated Error: Canary rollback testing')
+            return _report_simulated_error(
+                'Simulated Error: Canary rollback testing'
+            )
 
         # Normal vote processing
         redis = get_redis()
