@@ -1,5 +1,5 @@
 # ════════════════════════════════════════════════════════════════════════════════
-# TEST JIRA INTEGRATION - One-time verification
+# TEST JIRA INTEGRATION - Verify Jira API connectivity
 # ════════════════════════════════════════════════════════════════════════════════
 
 name: "🧪 Test Jira Integration"
